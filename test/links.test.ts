@@ -1,4 +1,4 @@
-import { extractLinks } from "../src/links";
+import { extractLinks, extractLinksWithStats } from "../src/links";
 
 describe("extractLinks", () => {
   const startUrl = "https://crawlme.monzo.com/";
@@ -33,6 +33,29 @@ describe("extractLinks", () => {
     expect(extractLinks(html, currentPageUrl, startUrl)).toEqual([
       "https://crawlme.monzo.com/inside",
     ]);
+  });
+
+  it("returns all HTTP links separately from crawlable links", () => {
+    const html = `
+      <a href="/inside">Inside</a>
+      <a href="https://monzo.com/">Parent domain</a>
+      <a href="https://community.monzo.com/">Other subdomain</a>
+      <a href="https://facebook.com/monzo">External</a>
+      <a href="mailto:support@example.com">Email</a>
+    `;
+
+    expect(extractLinksWithStats(html, currentPageUrl, startUrl)).toMatchObject({
+      links: [
+        "https://crawlme.monzo.com/inside",
+        "https://monzo.com/",
+        "https://community.monzo.com/",
+        "https://facebook.com/monzo",
+      ],
+      crawlableLinks: ["https://crawlme.monzo.com/inside"],
+      linksDiscovered: 5,
+      linksIgnored: 1,
+      duplicateLinks: 0,
+    });
   });
 
   it("ignores anchors without usable hrefs", () => {

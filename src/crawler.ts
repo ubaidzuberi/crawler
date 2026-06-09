@@ -1,6 +1,8 @@
-import { fetchPage, type FetchedPage } from "./fetchPage";
+import { fetchPage, type FetchedPage, type FetchPageOptions } from "./fetchPage";
 import { extractLinksWithStats } from "./links";
-import { normalizeCrawlUrl } from "./url-utils";
+import { isWithinCrawlBoundary, normalizeCrawlUrl } from "./url-utils";
+
+const WORKER_COUNT = 5;
 
 export type CrawledPage = {
   url: string;
@@ -31,7 +33,7 @@ export type CrawlStats = {
 };
 
 export type CrawlOptions = {
-  fetcher?: (url: string) => Promise<FetchedPage>;
+  fetcher?: (url: string, options?: FetchPageOptions) => Promise<FetchedPage>;
   onPage?: (page: CrawledPage) => void;
   onFailure?: (failure: CrawlFailure) => void;
 };
@@ -46,11 +48,12 @@ export async function crawl(
     throw new Error(`Invalid start URL: ${startUrl}`);
   }
 
+  const crawlStartUrl = normalizedStartUrl;
   const fetcher = options.fetcher ?? fetchPage;
   const pages: CrawledPage[] = [];
   const failures: CrawlFailure[] = [];
   const stats: CrawlStats = {
-    startUrl: normalizedStartUrl,
+    startUrl: crawlStartUrl,
     pagesVisited: 0,
     linksDiscovered: 0,
     internalLinksQueued: 0,
@@ -60,66 +63,132 @@ export async function crawl(
     redirectsFollowed: 0,
     redirectDuplicatesSkipped: 0,
   };
-  const queue = [normalizedStartUrl];
+  const queue = [crawlStartUrl];
   const seen = new Set(queue);
   const crawled = new Set<string>();
+  let inFlight = 0;
+  let hostCooldownUntil = 0;
   let queueIndex = 0;
+  let waiters: Array<() => void> = [];
 
-  while (queueIndex < queue.length) {
+  function hasQueuedUrl(): boolean {
+    return queueIndex < queue.length;
+  }
+
+  function takeNextUrl(): string | null {
+    if (!hasQueuedUrl()) {
+      return null;
+    }
+
     const requestedUrl = queue[queueIndex];
     queueIndex += 1;
+    inFlight += 1;
 
+    return requestedUrl;
+  }
+
+  function enqueueIfNew(url: string): boolean {
+    if (seen.has(url)) {
+      return false;
+    }
+
+    seen.add(url);
+    queue.push(url);
+    notifyStateChanged();
+
+    return true;
+  }
+
+  function waitForStateChange(): Promise<void> {
+    return new Promise((resolve) => {
+      waiters.push(resolve);
+    });
+  }
+
+  function notifyStateChanged(): void {
+    const currentWaiters = waiters;
+    waiters = [];
+
+    for (const resolve of currentWaiters) {
+      resolve();
+    }
+  }
+
+  function recordFailure(failure: CrawlFailure): void {
+    failures.push(failure);
+    stats.failedFetches += 1;
+    options.onFailure?.(failure);
+  }
+
+  function applyHostCooldown(cooldownMs: number): void {
+    hostCooldownUntil = Math.max(hostCooldownUntil, Date.now() + cooldownMs);
+    notifyStateChanged();
+  }
+
+  function getHostCooldownDelayMs(): number {
+    return Math.max(0, hostCooldownUntil - Date.now());
+  }
+
+  async function processUrl(requestedUrl: string): Promise<void> {
     let fetchedPage: FetchedPage;
 
     try {
-      fetchedPage = await fetcher(requestedUrl);
+      fetchedPage = await fetcher(requestedUrl, {
+        isAllowedRedirect: (redirectUrl) =>
+          isWithinCrawlBoundary(redirectUrl, crawlStartUrl),
+        onRateLimited: applyHostCooldown,
+      });
     } catch (error) {
-      const failure = {
+      recordFailure({
         url: requestedUrl,
         error: getErrorMessage(error),
-      };
+      });
+      return;
+    }
 
-      failures.push(failure);
-      stats.failedFetches += 1;
-      options.onFailure?.(failure);
-      continue;
+    for (const redirectUrl of fetchedPage.redirectChain ?? [
+      requestedUrl,
+      fetchedPage.finalUrl,
+    ]) {
+      if (isWithinCrawlBoundary(redirectUrl, crawlStartUrl)) {
+        seen.add(redirectUrl);
+      }
     }
 
     const finalUrl = normalizeCrawlUrl(
       fetchedPage.finalUrl,
       fetchedPage.finalUrl,
-      normalizedStartUrl,
+      crawlStartUrl,
     );
 
     if (!finalUrl) {
-      const failure = {
+      recordFailure({
         url: requestedUrl,
         error: `Final URL is outside the crawl boundary: ${fetchedPage.finalUrl}`,
-      };
-
-      failures.push(failure);
-      stats.failedFetches += 1;
-      options.onFailure?.(failure);
-      continue;
+      });
+      return;
     }
 
-    if (requestedUrl !== finalUrl) {
-      stats.redirectsFollowed += 1;
-    }
-
-    seen.add(finalUrl);
+    stats.redirectsFollowed += countRedirects(
+      fetchedPage.redirectChain,
+      requestedUrl,
+      finalUrl,
+    );
 
     if (crawled.has(finalUrl)) {
       stats.redirectDuplicatesSkipped += 1;
-      continue;
+      return;
     }
+
+    crawled.add(finalUrl);
 
     const extractedLinks = extractLinksWithStats(
       fetchedPage.html,
       finalUrl,
-      normalizedStartUrl,
+      crawlStartUrl,
     );
     const links = extractedLinks.links;
+    const crawlableLinks = extractedLinks.crawlableLinks;
 
     stats.linksDiscovered += extractedLinks.linksDiscovered;
     stats.linksIgnored += extractedLinks.linksIgnored;
@@ -130,18 +199,54 @@ export async function crawl(
     pages.push(crawledPage);
     stats.pagesVisited += 1;
     options.onPage?.(crawledPage);
-    crawled.add(finalUrl);
 
-    for (const link of links) {
-      if (!seen.has(link)) {
-        seen.add(link);
-        queue.push(link);
+    for (const link of crawlableLinks) {
+      if (enqueueIfNew(link)) {
         stats.internalLinksQueued += 1;
       } else {
         stats.duplicateUrlsSkipped += 1;
       }
     }
   }
+
+  async function runWorker(): Promise<void> {
+    while (true) {
+      if (!hasQueuedUrl()) {
+        if (inFlight === 0) {
+          return;
+        }
+
+        await waitForStateChange();
+        continue;
+      }
+
+      const hostCooldownDelayMs = getHostCooldownDelayMs();
+
+      if (hostCooldownDelayMs > 0) {
+        await delay(hostCooldownDelayMs);
+        continue;
+      }
+
+      const requestedUrl = takeNextUrl();
+
+      if (requestedUrl) {
+        try {
+          await processUrl(requestedUrl);
+        } finally {
+          inFlight -= 1;
+          notifyStateChanged();
+        }
+
+        continue;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: WORKER_COUNT }, async () => {
+      await runWorker();
+    }),
+  );
 
   return { pages, failures, stats };
 }
@@ -152,4 +257,20 @@ function getErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function countRedirects(
+  redirectChain: string[] | undefined,
+  requestedUrl: string,
+  finalUrl: string,
+): number {
+  if (redirectChain) {
+    return Math.max(0, redirectChain.length - 1);
+  }
+
+  return requestedUrl === finalUrl ? 0 : 1;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

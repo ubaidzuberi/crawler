@@ -1,8 +1,9 @@
 import { parse } from "node-html-parser";
-import { normalizeCrawlUrl } from "./url-utils";
+import { isWithinCrawlBoundary, normalizeHttpUrl } from "./url-utils";
 
 export type ExtractedLinks = {
   links: string[];
+  crawlableLinks: string[];
   linksDiscovered: number;
   linksIgnored: number;
   duplicateLinks: number;
@@ -13,7 +14,7 @@ export function extractLinks(
   currentPageUrl: string,
   startUrl: string,
 ): string[] {
-  return extractLinksWithStats(html, currentPageUrl, startUrl).links;
+  return extractLinksWithStats(html, currentPageUrl, startUrl).crawlableLinks;
 }
 
 export function extractLinksWithStats(
@@ -36,7 +37,7 @@ export function extractLinksWithStats(
 
     linksDiscovered += 1;
 
-    const normalizedUrl = normalizeCrawlUrl(href, currentPageUrl, startUrl);
+    const normalizedUrl = normalizeHttpUrl(href, currentPageUrl);
 
     if (!normalizedUrl) {
       linksIgnored += 1;
@@ -51,8 +52,13 @@ export function extractLinksWithStats(
     links.add(normalizedUrl);
   }
 
+  const normalizedLinks = [...links];
+
   return {
-    links: [...links],
+    links: normalizedLinks,
+    crawlableLinks: normalizedLinks.filter((link) =>
+      isWithinCrawlBoundary(link, startUrl),
+    ),
     linksDiscovered,
     linksIgnored,
     duplicateLinks,
