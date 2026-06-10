@@ -61,14 +61,14 @@ Implemented decisions:
 
 - Retries live inside `fetchPage`, so crawler orchestration and worker-pool logic do not need to know about retry policy.
 - Default retry policy is 2 retries after the initial attempt.
-- Backoff is exponential with a 250ms base delay: first retry waits 250ms, second retry waits 500ms.
+- Backoff is exponential with a 1 second base delay: first retry waits 1 second, second retry waits 2 seconds.
 - Jitter is intentionally not added because this is a single CLI crawler, not a distributed system with many clients retrying in lockstep.
 - The default per-request timeout is 10 seconds.
-- `429 Too Many Requests` applies a shared host-level cooldown before workers start new fetches.
-- Valid `Retry-After` headers are used for the shared cooldown and for the retrying request's own delay.
-- Missing or invalid `Retry-After` on a `429` uses a conservative default 30 second cooldown.
-- Existing in-flight requests are not cancelled when a cooldown starts; the cooldown only pauses future request starts.
-- Bounded concurrency and host cooldown solve different problems: 5 workers limits simultaneous requests, while cooldown responds to site-wide rate limiting.
+- The crawler relies primarily on prevention for rate limits: fixed concurrency, URL deduplication, and a configurable per-worker request delay.
+- `429 Too Many Requests` is retried locally by the worker that received it.
+- Valid `Retry-After` headers are used for that request's retry delay.
+- Missing or invalid `Retry-After` on a `429` uses a 5 second fallback retry delay.
+- A shared host cooldown is intentionally omitted to keep the single-host crawler small and testable.
 
 Retryable failures:
 
@@ -91,7 +91,7 @@ Non-retryable failures:
 
 Trade-off:
 
-- Host cooldown is global because the crawler intentionally stays on one exact hostname. If the crawler later supports multiple hosts, this should become per-host cooldown state.
+- A host-wide cooldown would react more strongly to `429`s, but it adds shared timing state across workers. For this take-home crawler, prevention plus bounded local retries is simpler to explain and test.
 
 ## Content-Type Questions
 

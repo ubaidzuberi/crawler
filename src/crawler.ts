@@ -3,6 +3,7 @@ import { extractLinksWithStats } from "./links";
 import { isWithinCrawlBoundary, normalizeCrawlUrl } from "./url-utils";
 
 const WORKER_COUNT = 5;
+const DEFAULT_REQUEST_DELAY_MS = 500;
 
 export type CrawledPage = {
   url: string;
@@ -34,6 +35,7 @@ export type CrawlStats = {
 
 export type CrawlOptions = {
   fetcher?: (url: string, options?: FetchPageOptions) => Promise<FetchedPage>;
+  requestDelayMs?: number;
   onPage?: (page: CrawledPage) => void;
   onFailure?: (failure: CrawlFailure) => void;
 };
@@ -50,6 +52,7 @@ export async function crawl(
 
   const crawlStartUrl = normalizedStartUrl;
   const fetcher = options.fetcher ?? fetchPage;
+  const requestDelayMs = options.requestDelayMs ?? DEFAULT_REQUEST_DELAY_MS;
   const pages: CrawledPage[] = [];
   const failures: CrawlFailure[] = [];
   const stats: CrawlStats = {
@@ -67,10 +70,10 @@ export async function crawl(
   const seen = new Set(queue);
   const crawled = new Set<string>();
   let inFlight = 0;
-  let hostCooldownUntil = 0;
   let queueIndex = 0;
-  let waiters: Array<() => void> = [];
+  let waiters: Array<() => void> = [];    // what is this??
 
+  // there's a bunch of functions defined within crawl because they need access to the crawl state.
   function hasQueuedUrl(): boolean {
     return queueIndex < queue.length;
   }
@@ -120,23 +123,13 @@ export async function crawl(
     options.onFailure?.(failure);
   }
 
-  function applyHostCooldown(cooldownMs: number): void {
-    hostCooldownUntil = Math.max(hostCooldownUntil, Date.now() + cooldownMs);
-    notifyStateChanged();
-  }
-
-  function getHostCooldownDelayMs(): number {
-    return Math.max(0, hostCooldownUntil - Date.now());
-  }
-
-  async function processUrl(requestedUrl: string): Promise<void> {
+  async function processUrl(requestedUrl: string): Promise<void> {  // fetch urls till enqueing
     let fetchedPage: FetchedPage;
 
     try {
       fetchedPage = await fetcher(requestedUrl, {
         isAllowedRedirect: (redirectUrl) =>
           isWithinCrawlBoundary(redirectUrl, crawlStartUrl),
-        onRateLimited: applyHostCooldown,
       });
     } catch (error) {
       recordFailure({
@@ -209,7 +202,7 @@ export async function crawl(
     }
   }
 
-  async function runWorker(): Promise<void> {
+  async function runWorker(): Promise<void> { // repeatedly claim urls and process them
     while (true) {
       if (!hasQueuedUrl()) {
         if (inFlight === 0) {
@@ -220,17 +213,14 @@ export async function crawl(
         continue;
       }
 
-      const hostCooldownDelayMs = getHostCooldownDelayMs();
-
-      if (hostCooldownDelayMs > 0) {
-        await delay(hostCooldownDelayMs);
-        continue;
-      }
-
       const requestedUrl = takeNextUrl();
 
       if (requestedUrl) {
         try {
+          if (requestDelayMs > 0) {
+            await delay(requestDelayMs);
+          }
+
           await processUrl(requestedUrl);
         } finally {
           inFlight -= 1;

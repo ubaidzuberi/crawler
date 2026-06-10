@@ -8,10 +8,19 @@ export type FetchedPage = {
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_REDIRECTS = 20;
 const DEFAULT_MAX_RETRIES = 2;
-const DEFAULT_RETRY_BASE_DELAY_MS = 250;
-const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 30_000;
+const DEFAULT_RETRY_BASE_DELAY_MS = 1_000;
+const DEFAULT_RATE_LIMIT_RETRY_DELAY_MS = 5_000;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+/*
+This is the crawlers network layer, it:
+1. takes a url
+2. fetches the page with retries and timeouts for safety
+3. follows redirects up to a limit, ensuring they are within the crawl boundary
+4. reject non-HTML content types
+5. return the final url (after redirects), the HTML, and the chain of redirects followed
+*/
 
 export type FetchPageOptions = {
   timeoutMs?: number;
@@ -19,10 +28,9 @@ export type FetchPageOptions = {
   maxRetries?: number;
   retryBaseDelayMs?: number;
   isAllowedRedirect?: (url: string) => boolean;
-  onRateLimited?: (cooldownMs: number) => void;
 };
 
-export async function fetchPage(
+export async function fetchPage(    // this is the retry wrapper. it wraps fetchPageOnce
   url: string,
   options: FetchPageOptions = {},
 ): Promise<FetchedPage> {
@@ -41,14 +49,14 @@ export async function fetchPage(
         throw error;
       }
 
-      await delay(getRetryDelayMs(error, retryBaseDelayMs * 2 ** attempt));
+      await delay(getRetryDelayMs(error, retryBaseDelayMs * 2 ** attempt));   // worker waits for some time before retrying
     }
   }
 
   throw lastError;
 }
 
-async function fetchPageOnce(
+async function fetchPageOnce(     // SIMPLIFY THIS ?? TO MAKE IT MORE REALISTIC??
   url: string,
   options: FetchPageOptions,
 ): Promise<FetchedPage> {
@@ -57,7 +65,7 @@ async function fetchPageOnce(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const requestedUrl = new URL(url).toString();
-  const redirectChain = [requestedUrl];
+  const redirectChain = [requestedUrl];     // for tracking the redirecdt chain for this request
   const redirectChainSeen = new Set(redirectChain);
   let currentUrl = requestedUrl;
 
@@ -68,21 +76,17 @@ async function fetchPageOnce(
         signal: controller.signal,
       });
 
-      if (!REDIRECT_STATUSES.has(response.status)) {
-        if (!response.ok) {
-          const rateLimitCooldownMs =
+      if (!REDIRECT_STATUSES.has(response.status)) {  // if not a redirect do the following
+        if (!response.ok) {   // if not a 2xx response do the following
+          const retryAfterMs =
             response.status === 429
-              ? getRateLimitCooldownMs(response.headers)
+              ? getRateLimitRetryDelayMs(response.headers)
               : undefined;
-
-          if (rateLimitCooldownMs !== undefined) {
-            options.onRateLimited?.(rateLimitCooldownMs);
-          }
 
           throw new FetchPageError(
             `Failed to fetch ${currentUrl}: ${response.status} ${response.statusText}`,
             RETRYABLE_HTTP_STATUSES.has(response.status),
-            rateLimitCooldownMs,
+            retryAfterMs,
           );
         }
 
@@ -103,13 +107,15 @@ async function fetchPageOnce(
         };
       }
 
-      if (redirectCount === maxRedirects) {
+      if (redirectCount === maxRedirects) {   // stops if redirects exceed the limit
         throw new FetchPageError(
           `Too many redirects fetching ${requestedUrl}`,
           false,
         );
       }
 
+
+      // continue redirecting chain...
       const location = response.headers.get("location");
 
       if (!location || location.trim() === "") {
@@ -149,11 +155,11 @@ async function fetchPageOnce(
       );
     }
 
-    if (error instanceof FetchPageError) {
+    if (error instanceof FetchPageError) {  // if the error thrown is a known/expected fetch page error there's no need to modify it
       throw error;
     }
 
-    throw new FetchPageError(getErrorMessage(error), true);
+    throw new FetchPageError(getErrorMessage(error), true); // if its an unexpected error then we wrap it in the format
   } finally {
     clearTimeout(timeout);
   }
@@ -185,8 +191,8 @@ function getRetryDelayMs(error: unknown, backoffDelayMs: number): number {
   return backoffDelayMs;
 }
 
-function getRateLimitCooldownMs(headers: Headers): number {
-  return parseRetryAfterMs(headers.get("retry-after")) ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS;
+function getRateLimitRetryDelayMs(headers: Headers): number {
+  return parseRetryAfterMs(headers.get("retry-after")) ?? DEFAULT_RATE_LIMIT_RETRY_DELAY_MS;
 }
 
 function parseRetryAfterMs(retryAfter: string | null): number | null {
@@ -220,14 +226,14 @@ function isHtmlContentType(contentType: string | null): boolean {
   return mediaType === "text/html" || mediaType === "application/xhtml+xml";
 }
 
-function isAbortError(error: unknown): boolean {
+function isAbortError(error: unknown): boolean {  // this is for catching fetch timeout errors
   return (
     typeof error === "object" &&
     error !== null &&
     "name" in error &&
     error.name === "AbortError"
   );
-}
+}   // why not just use promise.race with a timeout promise instead of abort controller ??
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {

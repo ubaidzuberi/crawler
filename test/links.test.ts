@@ -4,66 +4,47 @@ describe("extractLinks", () => {
   const startUrl = "https://crawlme.monzo.com/";
   const currentPageUrl = "https://crawlme.monzo.com/docs/page";
 
-  it("extracts crawlable links from anchor hrefs", () => {
+  it("extracts anchor hrefs and returns normalized crawlable links", () => {
     const html = `
-      <html>
-        <body>
-          <a href="https://crawlme.monzo.com/about">About</a>
-          <a href="/pricing">Pricing</a>
-          <a href="../help">Help</a>
-        </body>
-      </html>
+      <a href="./about">About</a>
+      <a href="../blog">Blog</a>
+      <a href="/contact">Contact</a>
     `;
 
     expect(extractLinks(html, currentPageUrl, startUrl)).toEqual([
-      "https://crawlme.monzo.com/about",
-      "https://crawlme.monzo.com/pricing",
-      "https://crawlme.monzo.com/help",
+      "https://crawlme.monzo.com/docs/about",
+      "https://crawlme.monzo.com/blog",
+      "https://crawlme.monzo.com/contact",
     ]);
   });
 
-  it("filters links that are outside the crawl boundary", () => {
-    const html = `
-      <a href="https://monzo.com/">Parent domain</a>
-      <a href="https://community.monzo.com/">Other subdomain</a>
-      <a href="https://facebook.com/monzo">External</a>
-      <a href="/inside">Inside</a>
-    `;
-
-    expect(extractLinks(html, currentPageUrl, startUrl)).toEqual([
-      "https://crawlme.monzo.com/inside",
-    ]);
-  });
-
-  it("returns all HTTP links separately from crawlable links", () => {
+  it("returns all HTTP links separately from same-host crawlable links", () => {
     const html = `
       <a href="/inside">Inside</a>
       <a href="https://monzo.com/">Parent domain</a>
       <a href="https://community.monzo.com/">Other subdomain</a>
-      <a href="https://facebook.com/monzo">External</a>
       <a href="mailto:support@example.com">Email</a>
     `;
 
-    expect(extractLinksWithStats(html, currentPageUrl, startUrl)).toMatchObject({
+    expect(extractLinksWithStats(html, currentPageUrl, startUrl)).toEqual({
       links: [
         "https://crawlme.monzo.com/inside",
         "https://monzo.com/",
         "https://community.monzo.com/",
-        "https://facebook.com/monzo",
       ],
       crawlableLinks: ["https://crawlme.monzo.com/inside"],
-      linksDiscovered: 5,
+      linksDiscovered: 4,
       linksIgnored: 1,
       duplicateLinks: 0,
     });
   });
 
-  it("ignores anchors without usable hrefs", () => {
+  it("ignores unusable hrefs and non-anchor href attributes", () => {
     const html = `
       <a>No href</a>
       <a href="">Empty href</a>
       <a href="   ">Whitespace href</a>
-      <a href="mailto:support@example.com">Email</a>
+      <a href="javascript:void(0)">Script</a>
       <span href="/not-an-anchor">Not an anchor</span>
       <a href="/valid">Valid</a>
     `;
@@ -73,29 +54,27 @@ describe("extractLinks", () => {
     ]);
   });
 
-  it("deduplicates links after normalization", () => {
+  it("deduplicates links after normalization while preserving first-seen order", () => {
     const html = `
       <a href="/about">About</a>
-      <a href="/about#team">Team</a>
-      <a href="https://CRAWLME.MONZO.COM/about">Duplicate with uppercase host</a>
+      <a href="/first">First</a>
+      <a href="/about#team">About team</a>
+      <a href="https://CRAWLME.MONZO.COM/first">First duplicate</a>
     `;
 
     expect(extractLinks(html, currentPageUrl, startUrl)).toEqual([
       "https://crawlme.monzo.com/about",
+      "https://crawlme.monzo.com/first",
     ]);
   });
 
-  it("preserves the order links are discovered in the document", () => {
-    const html = `
-      <a href="/first">First</a>
-      <a href="/second">Second</a>
-      <a href="/third">Third</a>
-    `;
-
-    expect(extractLinks(html, currentPageUrl, startUrl)).toEqual([
-      "https://crawlme.monzo.com/first",
-      "https://crawlme.monzo.com/second",
-      "https://crawlme.monzo.com/third",
-    ]);
+  it("returns empty results for pages with no usable anchors", () => {
+    expect(extractLinksWithStats("<main><p>No links here", currentPageUrl, startUrl)).toEqual({
+      links: [],
+      crawlableLinks: [],
+      linksDiscovered: 0,
+      linksIgnored: 0,
+      duplicateLinks: 0,
+    });
   });
 });

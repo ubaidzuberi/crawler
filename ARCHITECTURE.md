@@ -19,9 +19,9 @@ CLI start URL
 
 ## Modules
 
-- `src/cli.ts`: command-line entry point. Reads the start URL, streams visited pages and links, prints failures and a final summary.
-- `src/crawler.ts`: crawl orchestration. Owns workers, queue/frontier state, `seen`, `crawled`, stats, callbacks, and shared host cooldown.
-- `src/fetchPage.ts`: HTTP boundary. Owns fetch timeout, manual redirects, retry policy, `429` cooldown signals, and content-type filtering.
+- `src/cli.ts`: command-line entry point. Reads the start URL and optional `--delay-ms` pacing flag, streams visited pages and links, prints failures and a final summary.
+- `src/crawler.ts`: crawl orchestration. Owns workers, queue/frontier state, `seen`, `crawled`, stats, callbacks, and request pacing.
+- `src/fetchPage.ts`: HTTP boundary. Owns fetch timeout, manual redirects, local retry policy, `Retry-After` handling, and content-type filtering.
 - `src/links.ts`: HTML parsing and link extraction. Returns all normalized HTTP(S) links plus the same-host subset used for crawling.
 - `src/url-utils.ts`: URL normalization and same-host boundary checks.
 
@@ -90,6 +90,12 @@ Non-HTTP links such as `mailto:`, `tel:`, `javascript:`, invalid URLs, empty hre
 
 The crawler uses a fixed pool of 5 workers.
 
+By default, each worker waits 500ms before starting a request. This can be changed with:
+
+```text
+npm run crawl -- <url> --delay-ms 250
+```
+
 Shared state:
 
 - `queue`: discovered crawlable URLs
@@ -151,7 +157,7 @@ Defaults:
 - request timeout: 10 seconds
 - max redirects: 20
 - retries after initial attempt: 2
-- retry backoff: 250ms, then 500ms
+- retry backoff: 1s, then 2s
 
 Retryable:
 
@@ -176,17 +182,18 @@ Non-retryable:
 
 Bounded concurrency is not the same as rate limiting.
 
-The 5-worker pool limits simultaneous requests. Separately, `429 Too Many Requests` applies a shared host cooldown.
+The 5-worker pool limits simultaneous requests. Separately, the configurable per-worker request delay paces request starts. With the default 500ms delay, the crawler is intentionally conservative for a small single-host crawl.
 
-If `Retry-After` is valid, it is used. If missing or invalid, the crawler uses a conservative 30-second fallback cooldown.
+`429 Too Many Requests` is handled locally inside the fetch layer. If `Retry-After` is valid, the retry waits at least that long. If missing or invalid, the fetch layer uses a 5-second fallback retry delay.
 
-During cooldown:
+The crawler intentionally does not maintain a shared host cooldown. The design relies primarily on prevention:
 
-- existing in-flight requests are not cancelled
-- workers pause before starting new fetches
-- workers do not dequeue URLs while waiting
+- fixed worker count
+- configurable request delay
+- URL deduplication
+- local retry with bounded attempts
 
-This matters because the crawler only targets one hostname, so a `429` likely represents a host-wide signal.
+This keeps rate-limit handling simple and testable for the take-home scope.
 
 ## Content-Type Filtering
 

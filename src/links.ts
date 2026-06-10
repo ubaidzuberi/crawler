@@ -1,6 +1,16 @@
 import { parse } from "node-html-parser";
 import { isWithinCrawlBoundary, normalizeHttpUrl } from "./url-utils";
 
+/*
+parse HTML
+for each <a href>
+  skip empty hrefs
+  normalize href into HTTP(S) URL
+  ignore non-HTTP/invalid URLs
+  dedupe links on this page
+return all links plus crawlable subset
+*/
+
 export type ExtractedLinks = {
   links: string[];
   crawlableLinks: string[];

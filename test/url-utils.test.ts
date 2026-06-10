@@ -5,184 +5,99 @@ import {
 } from "../src/url-utils";
 
 describe("normalizeHttpUrl", () => {
-  it("normalizes HTTP links without applying the crawl boundary", () => {
-    expect(
-      normalizeHttpUrl(
-        "https://MONZO.COM/about#team",
-        "https://crawlme.monzo.com/",
-      ),
-    ).toBe("https://monzo.com/about");
+  const currentPageUrl = "https://crawlme.monzo.com/docs/page";
+
+  it("normalizes HTTP URLs without applying the crawl boundary", () => {
+    expect(normalizeHttpUrl("https://MONZO.COM:443/about#team", currentPageUrl)).toBe(
+      "https://monzo.com/about",
+    );
   });
 
-  it("rejects non-HTTP protocols and invalid URLs", () => {
-    expect(
-      normalizeHttpUrl("mailto:support@example.com", "https://crawlme.monzo.com/"),
-    ).toBeNull();
+  it("resolves relative and protocol-relative URLs", () => {
+    expect(normalizeHttpUrl("./about", currentPageUrl)).toBe(
+      "https://crawlme.monzo.com/docs/about",
+    );
+    expect(normalizeHttpUrl("../blog", currentPageUrl)).toBe(
+      "https://crawlme.monzo.com/blog",
+    );
+    expect(normalizeHttpUrl("/contact", currentPageUrl)).toBe(
+      "https://crawlme.monzo.com/contact",
+    );
+    expect(normalizeHttpUrl("//monzo.com/about", currentPageUrl)).toBe(
+      "https://monzo.com/about",
+    );
+  });
 
-    expect(normalizeHttpUrl("https://", "https://crawlme.monzo.com/")).toBeNull();
+  it("rejects non-HTTP protocols and malformed URLs", () => {
+    for (const href of [
+      "mailto:support@example.com",
+      "tel:+441234567890",
+      "javascript:void(0)",
+      "ftp://crawlme.monzo.com/file",
+      "https://",
+    ]) {
+      expect(normalizeHttpUrl(href, currentPageUrl)).toBeNull();
+    }
   });
 });
 
 describe("normalizeCrawlUrl", () => {
   const startUrl = "https://crawlme.monzo.com/";
 
-  it("resolves relative URLs against the current page URL", () => {
+  it("accepts normalized HTTP and HTTPS URLs on the starting hostname", () => {
     expect(
       normalizeCrawlUrl(
-        "../about",
-        "https://crawlme.monzo.com/docs/page",
+        "https://CRAWLME.MONZO.COM/about#team",
+        startUrl,
         startUrl,
       ),
     ).toBe("https://crawlme.monzo.com/about");
+    expect(normalizeCrawlUrl("http://crawlme.monzo.com/about", startUrl, startUrl)).toBe(
+      "http://crawlme.monzo.com/about",
+    );
   });
 
-  it("documents URL's trailing-slash behaviour for relative paths", () => {
-    expect(
-      normalizeCrawlUrl(
-        "../about",
-        "https://crawlme.monzo.com/docs/page/",
-        startUrl,
-      ),
-    ).toBe("https://crawlme.monzo.com/docs/about");
+  it("rejects parent domains, subdomains, and www variants", () => {
+    for (const href of [
+      "https://monzo.com/",
+      "https://community.monzo.com/",
+      "https://www.crawlme.monzo.com/",
+    ]) {
+      expect(normalizeCrawlUrl(href, startUrl, startUrl)).toBeNull();
+    }
   });
 
-  it("removes fragments and keeps query strings", () => {
-    expect(
-      normalizeCrawlUrl(
-        "/search?q=current-account#results",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBe("https://crawlme.monzo.com/search?q=current-account");
-  });
-
-  it("rejects URLs outside the starting hostname", () => {
-    expect(
-      normalizeCrawlUrl(
-        "https://monzo.com/",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBeNull();
-
-    expect(
-      normalizeCrawlUrl(
-        "https://community.monzo.com/",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBeNull();
-
-    expect(
-      normalizeCrawlUrl(
-        "https://facebook.com/monzo",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBeNull();
-  });
-
-  it("allows HTTP and HTTPS on the same hostname", () => {
-    expect(
-      normalizeCrawlUrl(
-        "http://crawlme.monzo.com/about",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBe("http://crawlme.monzo.com/about");
-  });
-
-  it("rejects non-HTTP protocols and invalid URLs", () => {
-    expect(
-      normalizeCrawlUrl(
-        "mailto:support@example.com",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBeNull();
-
-    expect(
-      normalizeCrawlUrl(
-        "https://",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBeNull();
-  });
-
-  it("relies on URL to normalize host case and default ports", () => {
-    expect(
-      normalizeCrawlUrl(
-        "https://CRAWLME.MONZO.COM:443/About",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBe("https://crawlme.monzo.com/About");
-  });
-
-  it("relies on URL to add the root slash for bare host URLs", () => {
-    expect(
-      normalizeCrawlUrl(
-        "https://crawlme.monzo.com",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBe("https://crawlme.monzo.com/");
-  });
-
-  it("relies on URL to normalize dot segments in paths", () => {
-    expect(
-      normalizeCrawlUrl(
-        "/docs/../about",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBe("https://crawlme.monzo.com/about");
-  });
-
-  it("does not merge paths that differ only by trailing slash", () => {
-    expect(
-      normalizeCrawlUrl(
-        "/about/",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBe("https://crawlme.monzo.com/about/");
-  });
-
-  it("does not merge root and index.html paths", () => {
-    expect(
-      normalizeCrawlUrl(
-        "/index.html",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBe("https://crawlme.monzo.com/index.html");
-  });
-
-  it("does not sort or remove query parameters", () => {
-    expect(
-      normalizeCrawlUrl(
-        "/search?b=2&a=1&utm_source=test&empty=",
-        "https://crawlme.monzo.com/",
-        startUrl,
-      ),
-    ).toBe("https://crawlme.monzo.com/search?b=2&a=1&utm_source=test&empty=");
+  it("keeps conservative URL distinctions instead of guessing equivalence", () => {
+    expect(normalizeCrawlUrl("/about", startUrl, startUrl)).toBe(
+      "https://crawlme.monzo.com/about",
+    );
+    expect(normalizeCrawlUrl("/about/", startUrl, startUrl)).toBe(
+      "https://crawlme.monzo.com/about/",
+    );
+    expect(normalizeCrawlUrl("/index.html", startUrl, startUrl)).toBe(
+      "https://crawlme.monzo.com/index.html",
+    );
+    expect(normalizeCrawlUrl("/search?b=2&a=1", startUrl, startUrl)).toBe(
+      "https://crawlme.monzo.com/search?b=2&a=1",
+    );
   });
 });
 
 describe("isWithinCrawlBoundary", () => {
   const startUrl = "https://crawlme.monzo.com/";
 
-  it("accepts URLs on the starting hostname", () => {
-    expect(
-      isWithinCrawlBoundary("https://crawlme.monzo.com/about", startUrl),
-    ).toBe(true);
-  });
-
-  it("rejects parent domains and sibling subdomains", () => {
+  it("uses an exact same-host policy", () => {
+    expect(isWithinCrawlBoundary("https://crawlme.monzo.com/about", startUrl)).toBe(
+      true,
+    );
+    expect(isWithinCrawlBoundary("http://crawlme.monzo.com/about", startUrl)).toBe(
+      true,
+    );
     expect(isWithinCrawlBoundary("https://monzo.com/", startUrl)).toBe(false);
     expect(isWithinCrawlBoundary("https://community.monzo.com/", startUrl)).toBe(
+      false,
+    );
+    expect(isWithinCrawlBoundary("https://www.crawlme.monzo.com/", startUrl)).toBe(
       false,
     );
   });

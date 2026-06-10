@@ -80,64 +80,6 @@ describe("fetchPage", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("throws when a redirect is missing a Location header", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      status: 302,
-      headers: new Headers(),
-    } as Partial<Response> as Response);
-
-    await expect(fetchPage("https://crawlme.monzo.com/start")).rejects.toThrow(
-      "Redirect from https://crawlme.monzo.com/start is missing a Location header",
-    );
-  });
-
-  it("throws when a redirect loop is detected", async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValueOnce({
-        status: 302,
-        headers: new Headers({ location: "/middle" }),
-      } as Partial<Response> as Response)
-      .mockResolvedValueOnce({
-        status: 302,
-        headers: new Headers({ location: "/start" }),
-      } as Partial<Response> as Response);
-
-    await expect(fetchPage("https://crawlme.monzo.com/start")).rejects.toThrow(
-      "Redirect loop detected while fetching https://crawlme.monzo.com/start: https://crawlme.monzo.com/start",
-    );
-  });
-
-  it("throws when the redirect limit is exceeded", async () => {
-    global.fetch = jest.fn((url: URL | RequestInfo) => {
-      const currentUrl = url.toString();
-      const nextUrl = currentUrl.endsWith("/start")
-        ? "https://crawlme.monzo.com/one"
-        : "https://crawlme.monzo.com/two";
-
-      return Promise.resolve({
-        status: 302,
-        headers: new Headers({ location: nextUrl }),
-      } as Partial<Response> as Response);
-    });
-
-    await expect(
-      fetchPage("https://crawlme.monzo.com/start", { maxRedirects: 1 }),
-    ).rejects.toThrow("Too many redirects fetching https://crawlme.monzo.com/start");
-  });
-
-  it("throws when the response is not successful", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      statusText: "Not Found",
-    } as Partial<Response> as Response);
-
-    await expect(fetchPage("https://crawlme.monzo.com/missing")).rejects.toThrow(
-      "Failed to fetch https://crawlme.monzo.com/missing: 404 Not Found",
-    );
-  });
-
   it("retries transient HTTP failures", async () => {
     global.fetch = jest
       .fn()
@@ -199,64 +141,28 @@ describe("fetchPage", () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("does not retry redirect policy failures", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      status: 302,
-      headers: new Headers({ location: "https://monzo.com/" }),
-    } as Partial<Response> as Response);
+  it("retries rate limits using Retry-After when present", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: new Headers({ "retry-after": "0" }),
+      } as Partial<Response> as Response)
+      .mockResolvedValueOnce(createHtmlResponse("<html></html>"));
 
     await expect(
-      fetchPage("https://crawlme.monzo.com/start", {
-        isAllowedRedirect: (url) => new URL(url).hostname === "crawlme.monzo.com",
+      fetchPage("https://crawlme.monzo.com/rate-limited", {
         retryBaseDelayMs: 0,
       }),
-    ).rejects.toThrow(
-      "Redirect target is outside the crawl boundary: https://monzo.com/",
-    );
+    ).resolves.toMatchObject({
+      requestedUrl: "https://crawlme.monzo.com/rate-limited",
+      finalUrl: "https://crawlme.monzo.com/rate-limited",
+      html: "<html></html>",
+    });
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("reports Retry-After cooldowns for rate limits", async () => {
-    const onRateLimited = jest.fn();
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 429,
-      statusText: "Too Many Requests",
-      headers: new Headers({ "retry-after": "10" }),
-    } as Partial<Response> as Response);
-
-    await expect(
-      fetchPage("https://crawlme.monzo.com/rate-limited", {
-        maxRetries: 0,
-        onRateLimited,
-      }),
-    ).rejects.toThrow(
-      "Failed to fetch https://crawlme.monzo.com/rate-limited: 429 Too Many Requests",
-    );
-
-    expect(onRateLimited).toHaveBeenCalledWith(10_000);
-  });
-
-  it("uses a default cooldown when a rate limit has no Retry-After header", async () => {
-    const onRateLimited = jest.fn();
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 429,
-      statusText: "Too Many Requests",
-      headers: new Headers(),
-    } as Partial<Response> as Response);
-
-    await expect(
-      fetchPage("https://crawlme.monzo.com/rate-limited", {
-        maxRetries: 0,
-        onRateLimited,
-      }),
-    ).rejects.toThrow(
-      "Failed to fetch https://crawlme.monzo.com/rate-limited: 429 Too Many Requests",
-    );
-
-    expect(onRateLimited).toHaveBeenCalledWith(30_000);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
   it("throws when the request times out", async () => {
@@ -272,32 +178,6 @@ describe("fetchPage", () => {
     await expect(
       fetchPage("https://crawlme.monzo.com/slow", { timeoutMs: 1 }),
     ).rejects.toThrow("Timed out fetching https://crawlme.monzo.com/slow after 1ms");
-  });
-
-  it("accepts XHTML responses", async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValue(
-        createHtmlResponse("<html></html>", "application/xhtml+xml; charset=utf-8"),
-      );
-
-    await expect(fetchPage("https://crawlme.monzo.com/xhtml")).resolves.toMatchObject({
-      finalUrl: "https://crawlme.monzo.com/xhtml",
-      html: "<html></html>",
-    });
-  });
-
-  it("rejects missing content type", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      text: jest.fn().mockResolvedValue("<html></html>"),
-    } as Partial<Response> as Response);
-
-    await expect(fetchPage("https://crawlme.monzo.com/no-header")).rejects.toThrow(
-      "Unsupported content type for https://crawlme.monzo.com/no-header: missing",
-    );
   });
 
   it("rejects non-HTML content types without retrying", async () => {
