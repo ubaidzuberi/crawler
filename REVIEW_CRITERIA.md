@@ -86,3 +86,4 @@ Use these questions when assessing the solution:
 - Are there any unneccessary additons or considerations that don't apply to a crawler of this scale (only crawling a single host)
 - Is the testing reasonable? is anything missing or untested? does the testing strategy make sense? should any tests be added or removed? 
 - Are there fintech-relevant maturity concerns, such as unsafe defaults, unclear failure handling, or brittle behavior?
+- is the folder and file structure fine? should it be organised better? are the file names clear and useful?
