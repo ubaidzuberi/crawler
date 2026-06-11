@@ -76,7 +76,6 @@ async function fetchPageOnce(
   const signal = AbortSignal.timeout(timeoutMs);
   const requestedUrl = new URL(url).toString();
   const redirectChain = [requestedUrl];     // for tracking the redirecdt chain for this request
-  const redirectChainSeen = new Set(redirectChain);
   let currentUrl = requestedUrl;
 
   try {
@@ -141,13 +140,12 @@ async function fetchPageOnce(
         );
       }
 
-      if (redirectChainSeen.has(nextUrl)) {
+      if (redirectChain.includes(nextUrl)) {
         throw nonRetryableError(
           `Redirect loop detected while fetching ${requestedUrl}: ${nextUrl}`,
         );
       }
 
-      redirectChainSeen.add(nextUrl);
       redirectChain.push(nextUrl);
       currentUrl = nextUrl;
     }
