@@ -11,7 +11,7 @@ const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_RETRY_BASE_DELAY_MS = 1_000;
 const DEFAULT_RATE_LIMIT_RETRY_DELAY_MS = 5_000;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
 /*
 This is the crawlers network layer, it:
