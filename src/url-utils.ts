@@ -1,19 +1,5 @@
 const CRAWLABLE_PROTOCOLS = new Set(["http:", "https:"]);
 
-export function normalizeCrawlUrl( // checks if the URL is valid and is within the same hostname as the start URL
-  href: string,
-  currentPageUrl: string,
-  startUrl: string,
-): string | null {
-  const normalizedUrl = normalizeHttpUrl(href, currentPageUrl);
-
-  if (!normalizedUrl || !isWithinCrawlBoundary(normalizedUrl, startUrl)) {
-    return null;
-  }
-
-  return normalizedUrl;
-}
-
 export function normalizeHttpUrl(   // normalises the URL and checks if it's valid
   href: string,
   currentPageUrl: string,

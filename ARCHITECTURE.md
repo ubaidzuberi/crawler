@@ -100,7 +100,7 @@ Shared state:
 
 - `queue`: discovered crawlable URLs
 - `queueIndex`: next queue entry to claim
-- `seen`: URLs already known/enqueued/seen through redirects
+- `seen`: URLs already known/enqueued
 - `crawled`: final URLs already processed
 - `inFlight`: URLs currently being processed
 
@@ -136,7 +136,7 @@ It follows:
 301, 302, 303, 307, 308
 ```
 
-Manual redirect handling gives the crawler visibility into the full redirect chain.
+Manual redirect handling gives the crawler control over redirect policy.
 
 Behaviour:
 
@@ -145,10 +145,9 @@ Behaviour:
 - redirect loops are detected within one fetch operation
 - max redirects is 20
 - redirects outside the crawl boundary are rejected before fetching the external URL
-- same-host redirect-chain URLs are added to `seen`
 - the final URL is processed once via `crawled`
 
-This avoids future wasted fetches for intermediate redirect URLs.
+This keeps redirect behavior explicit without adding extra crawler-level canonicalization rules.
 
 ## Fetch Policy
 
@@ -176,6 +175,9 @@ Non-retryable:
 - too many redirects
 - missing redirect `Location`
 - redirect outside crawl boundary
+
+Skipped:
+
 - unsupported content type
 
 ## Rate Limiting
@@ -221,7 +223,7 @@ Rejected:
 - binary downloads
 - arbitrary text files
 
-Unsupported content types are currently recorded as crawl failures. A future polish pass could split intentional skips from fetch failures.
+Unsupported content types are skipped by the crawler rather than recorded as fetch failures. The request succeeded, but the crawler deliberately does not parse non-HTML responses.
 
 ## Result Model
 

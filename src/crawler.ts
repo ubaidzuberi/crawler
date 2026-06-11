@@ -1,6 +1,12 @@
-import { fetchPage, type FetchedPage, type FetchPageOptions } from "./fetchPage";
-import { extractLinksWithStats } from "./links";
-import { isWithinCrawlBoundary, normalizeCrawlUrl } from "./url-utils";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  fetchPage,
+  type FetchedPage,
+  type FetchPageOptions,
+} from "./fetchPage";
+import { getErrorMessage, isUnsupportedContentTypeError } from "./errors";
+import { extractLinks } from "./links";
+import { isWithinCrawlBoundary, normalizeHttpUrl } from "./url-utils";
 
 const WORKER_COUNT = 5;
 const DEFAULT_REQUEST_DELAY_MS = 500;
@@ -44,7 +50,7 @@ export async function crawl(
   startUrl: string,
   options: CrawlOptions = {},
 ): Promise<CrawlResult> {
-  const normalizedStartUrl = normalizeCrawlUrl(startUrl, startUrl, startUrl);
+  const normalizedStartUrl = normalizeHttpUrl(startUrl, startUrl);
 
   if (!normalizedStartUrl) {
     throw new Error(`Invalid start URL: ${startUrl}`);
@@ -71,15 +77,10 @@ export async function crawl(
   const crawled = new Set<string>();
   let inFlight = 0;
   let queueIndex = 0;
-  let waiters: Array<() => void> = [];    // what is this??
-
-  // there's a bunch of functions defined within crawl because they need access to the crawl state.
-  function hasQueuedUrl(): boolean {
-    return queueIndex < queue.length;
-  }
+  let waiters: Array<() => void> = [];  
 
   function takeNextUrl(): string | null {
-    if (!hasQueuedUrl()) {
+    if (queueIndex >= queue.length) {
       return null;
     }
 
@@ -132,6 +133,10 @@ export async function crawl(
           isWithinCrawlBoundary(redirectUrl, crawlStartUrl),
       });
     } catch (error) {
+      if (isUnsupportedContentTypeError(error)) {
+        return;
+      }
+
       recordFailure({
         url: requestedUrl,
         error: getErrorMessage(error),
@@ -139,22 +144,12 @@ export async function crawl(
       return;
     }
 
-    for (const redirectUrl of fetchedPage.redirectChain ?? [
-      requestedUrl,
-      fetchedPage.finalUrl,
-    ]) {
-      if (isWithinCrawlBoundary(redirectUrl, crawlStartUrl)) {
-        seen.add(redirectUrl);
-      }
-    }
-
-    const finalUrl = normalizeCrawlUrl(
+    const finalUrl = normalizeHttpUrl(
       fetchedPage.finalUrl,
       fetchedPage.finalUrl,
-      crawlStartUrl,
     );
 
-    if (!finalUrl) {
+    if (!finalUrl || !isWithinCrawlBoundary(finalUrl, crawlStartUrl)) {
       recordFailure({
         url: requestedUrl,
         error: `Final URL is outside the crawl boundary: ${fetchedPage.finalUrl}`,
@@ -175,7 +170,7 @@ export async function crawl(
 
     crawled.add(finalUrl);
 
-    const extractedLinks = extractLinksWithStats(
+    const extractedLinks = extractLinks(
       fetchedPage.html,
       finalUrl,
       crawlStartUrl,
@@ -204,7 +199,7 @@ export async function crawl(
 
   async function runWorker(): Promise<void> { // repeatedly claim urls and process them
     while (true) {
-      if (!hasQueuedUrl()) {
+      if (queueIndex >= queue.length) {
         if (inFlight === 0) {
           return;
         }
@@ -241,14 +236,6 @@ export async function crawl(
   return { pages, failures, stats };
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
-
 function countRedirects(
   redirectChain: string[] | undefined,
   requestedUrl: string,
@@ -259,8 +246,4 @@ function countRedirects(
   }
 
   return requestedUrl === finalUrl ? 0 : 1;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

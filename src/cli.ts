@@ -1,8 +1,10 @@
+import { parseArgs } from "node:util";
 import { crawl } from "./crawler";
+import { getErrorMessage } from "./errors";
 
 async function main(): Promise<void> {
   try {
-    const args = parseArgs(process.argv.slice(2));
+    const args = readCliArgs(process.argv.slice(2));
 
     if (!args.startUrl) {
       console.error("Usage: npm run crawl -- <url> [--delay-ms <milliseconds>]");
@@ -45,41 +47,28 @@ type CliArgs = {
   delayMs?: number;
 };
 
-function parseArgs(args: string[]): CliArgs {
-  const parsed: CliArgs = {};
+function readCliArgs(args: string[]): CliArgs {
+  const parsed = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      "delay-ms": {
+        type: "string",
+      },
+    },
+  });
 
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === "--delay-ms") {
-      const value = args[index + 1];
-
-      if (!value) {
-        throw new Error("--delay-ms requires a value");
-      }
-
-      parsed.delayMs = parseDelayMs(value);
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith("--delay-ms=")) {
-      parsed.delayMs = parseDelayMs(arg.slice("--delay-ms=".length));
-      continue;
-    }
-
-    if (arg.startsWith("--")) {
-      throw new Error(`Unknown option: ${arg}`);
-    }
-
-    if (parsed.startUrl) {
-      throw new Error(`Unexpected argument: ${arg}`);
-    }
-
-    parsed.startUrl = arg;
+  if (parsed.positionals.length > 1) {
+    throw new Error(`Unexpected argument: ${parsed.positionals[1]}`);
   }
 
-  return parsed;
+  return {
+    startUrl: parsed.positionals[0],
+    delayMs:
+      parsed.values["delay-ms"] === undefined
+        ? undefined
+        : parseDelayMs(parsed.values["delay-ms"]),
+  };
 }
 
 function parseDelayMs(value: string): number {
@@ -90,14 +79,6 @@ function parseDelayMs(value: string): number {
   }
 
   return delayMs;
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }
 
 void main();

@@ -2,6 +2,13 @@ import { crawl } from "../src/crawler";
 import type { FetchedPage } from "../src/fetchPage";
 
 describe("crawl", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
   it("crawls same-host links and includes external links without fetching them", async () => {
     const fetcher = createFetcher({
       "https://crawlme.monzo.com/": `
@@ -93,6 +100,46 @@ describe("crawl", () => {
         error: "Not Found",
       },
     ]);
+  });
+
+  it("silently skips non-HTML pages", async () => {
+    global.fetch = jest.fn((url: URL | RequestInfo): Promise<Response> => {
+      const requestedUrl = url.toString();
+
+      if (requestedUrl === "https://crawlme.monzo.com/") {
+        return Promise.resolve(
+          createHtmlResponse(`
+            <a href="/file.pdf">PDF</a>
+            <a href="/next">Next</a>
+          `),
+        );
+      }
+
+      if (requestedUrl === "https://crawlme.monzo.com/file.pdf") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/pdf" }),
+          text: jest.fn().mockResolvedValue("pdf bytes"),
+        } as Partial<Response> as Response);
+      }
+
+      if (requestedUrl === "https://crawlme.monzo.com/next") {
+        return Promise.resolve(createHtmlResponse(""));
+      }
+
+      throw new Error(`Unexpected URL: ${requestedUrl}`);
+    });
+
+    const result = await crawl("https://crawlme.monzo.com/", {
+      requestDelayMs: 0,
+    });
+
+    expect(result.pages.map((page) => page.url)).toEqual([
+      "https://crawlme.monzo.com/",
+      "https://crawlme.monzo.com/next",
+    ]);
+    expect(result.failures).toEqual([]);
   });
 
   it("emits a redirected final URL once when multiple requested URLs resolve to it", async () => {
@@ -260,4 +307,13 @@ async function waitUntil(condition: () => boolean): Promise<void> {
 
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
+}
+
+function createHtmlResponse(html: string): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+    text: jest.fn().mockResolvedValue(html),
+  } as Partial<Response> as Response;
 }

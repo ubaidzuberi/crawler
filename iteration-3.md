@@ -20,8 +20,7 @@ Planned behaviour:
 
 - Follow redirect statuses `301`, `302`, `303`, `307`, and `308`.
 - Resolve relative `Location` headers against the current URL.
-- Return the full same-host redirect chain to the crawler.
-- Add same-host URLs from the redirect chain to the crawler's `seen` set so future discoveries of intermediate redirect URLs can be skipped.
+- Return the redirect chain to the crawler for final URL handling and redirect stats.
 - Reject redirects as soon as a target leaves the crawl boundary, instead of fetching the external final page.
 - Detect redirect loops inside a single fetch operation with a local redirect-chain set.
 - Enforce a maximum redirect count, likely 20.
@@ -29,7 +28,6 @@ Planned behaviour:
 
 Why this is worth adding:
 
-- Avoids future wasted fetches for intermediate redirect URLs.
 - Makes external redirects cheaper because the crawler can stop before fetching the external page.
 - Produces clearer redirect-loop and invalid-redirect failures.
 - Gives the crawler explicit control over redirect limits and stats.
@@ -44,7 +42,6 @@ Implemented decisions:
 - `FetchedPage` includes `redirectChain` for real fetches.
 - The crawler passes an `isAllowedRedirect` boundary predicate into the fetcher.
 - External redirect targets are rejected before fetching the external URL.
-- The crawler adds same-host redirect-chain URLs to `seen`, so later discoveries of intermediate redirect URLs can be skipped.
 - Redirect stats now count redirect hops from the returned chain when available.
 
 ## Retry Questions
@@ -108,7 +105,7 @@ Trade-off:
 - Missing `Content-Type` is rejected.
 - All other content types are rejected, including PDFs, images, JSON, CSS, JavaScript, binary downloads, and arbitrary text files.
 - Unsupported content type is non-retryable because retrying the same URL should not change the resource type.
-- Unsupported content type is currently recorded by the crawler as a failure. This keeps the result model small; a future polish pass could split intentional skips from fetch failures.
+- Unsupported content type is skipped by the crawler rather than recorded as a fetch failure.
 
 ## URL Canonicalisation Questions
 

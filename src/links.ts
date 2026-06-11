@@ -23,14 +23,6 @@ export function extractLinks(
   html: string,
   currentPageUrl: string,
   startUrl: string,
-): string[] {
-  return extractLinksWithStats(html, currentPageUrl, startUrl).crawlableLinks;
-}
-
-export function extractLinksWithStats(
-  html: string,
-  currentPageUrl: string,
-  startUrl: string,
 ): ExtractedLinks {
   const root = parse(html);
   const links = new Set<string>();

@@ -1,3 +1,14 @@
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  getErrorMessage,
+  getRetryDelayMs,
+  isKnownFetchError,
+  isRetryableError,
+  nonRetryableError,
+  retryableError,
+  unsupportedContentTypeError,
+} from "./errors";
+
 export type FetchedPage = {
   requestedUrl: string;
   finalUrl: string;
@@ -56,14 +67,13 @@ export async function fetchPage(    // this is the retry wrapper. it wraps fetch
   throw lastError;
 }
 
-async function fetchPageOnce(     // SIMPLIFY THIS ?? TO MAKE IT MORE REALISTIC??
+async function fetchPageOnce(   
   url: string,
   options: FetchPageOptions,
 ): Promise<FetchedPage> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = AbortSignal.timeout(timeoutMs);
   const requestedUrl = new URL(url).toString();
   const redirectChain = [requestedUrl];     // for tracking the redirecdt chain for this request
   const redirectChainSeen = new Set(redirectChain);
@@ -73,29 +83,31 @@ async function fetchPageOnce(     // SIMPLIFY THIS ?? TO MAKE IT MORE REALISTIC?
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
       const response = await fetch(currentUrl, {
         redirect: "manual",
-        signal: controller.signal,
+        signal,
       });
 
       if (!REDIRECT_STATUSES.has(response.status)) {  // if not a redirect do the following
         if (!response.ok) {   // if not a 2xx response do the following
           const retryAfterMs =
             response.status === 429
-              ? getRateLimitRetryDelayMs(response.headers)
+              ? parseRetryAfterMs(response.headers.get("retry-after")) ??
+                DEFAULT_RATE_LIMIT_RETRY_DELAY_MS
               : undefined;
 
-          throw new FetchPageError(
-            `Failed to fetch ${currentUrl}: ${response.status} ${response.statusText}`,
-            RETRYABLE_HTTP_STATUSES.has(response.status),
-            retryAfterMs,
-          );
+          const message = `Failed to fetch ${currentUrl}: ${response.status} ${response.statusText}`;
+
+          if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
+            throw retryableError(message, retryAfterMs);
+          }
+
+          throw nonRetryableError(message);
         }
 
         const contentType = response.headers.get("content-type");
 
         if (!isHtmlContentType(contentType)) {
-          throw new FetchPageError(
+          throw unsupportedContentTypeError(
             `Unsupported content type for ${currentUrl}: ${contentType ?? "missing"}`,
-            false,
           );
         }
 
@@ -108,10 +120,7 @@ async function fetchPageOnce(     // SIMPLIFY THIS ?? TO MAKE IT MORE REALISTIC?
       }
 
       if (redirectCount === maxRedirects) {   // stops if redirects exceed the limit
-        throw new FetchPageError(
-          `Too many redirects fetching ${requestedUrl}`,
-          false,
-        );
+        throw nonRetryableError(`Too many redirects fetching ${requestedUrl}`);
       }
 
 
@@ -119,25 +128,22 @@ async function fetchPageOnce(     // SIMPLIFY THIS ?? TO MAKE IT MORE REALISTIC?
       const location = response.headers.get("location");
 
       if (!location || location.trim() === "") {
-        throw new FetchPageError(
+        throw nonRetryableError(
           `Redirect from ${currentUrl} is missing a Location header`,
-          false,
         );
       }
 
       const nextUrl = new URL(location, currentUrl).toString();
 
       if (options.isAllowedRedirect && !options.isAllowedRedirect(nextUrl)) {
-        throw new FetchPageError(
+        throw nonRetryableError(
           `Redirect target is outside the crawl boundary: ${nextUrl}`,
-          false,
         );
       }
 
       if (redirectChainSeen.has(nextUrl)) {
-        throw new FetchPageError(
+        throw nonRetryableError(
           `Redirect loop detected while fetching ${requestedUrl}: ${nextUrl}`,
-          false,
         );
       }
 
@@ -146,53 +152,18 @@ async function fetchPageOnce(     // SIMPLIFY THIS ?? TO MAKE IT MORE REALISTIC?
       currentUrl = nextUrl;
     }
 
-    throw new FetchPageError(`Too many redirects fetching ${requestedUrl}`, false);
+    throw nonRetryableError(`Too many redirects fetching ${requestedUrl}`);
   } catch (error) {
     if (isAbortError(error)) {
-      throw new FetchPageError(
-        `Timed out fetching ${currentUrl} after ${timeoutMs}ms`,
-        true,
-      );
+      throw retryableError(`Timed out fetching ${currentUrl} after ${timeoutMs}ms`);
     }
 
-    if (error instanceof FetchPageError) {  // if the error thrown is a known/expected fetch page error there's no need to modify it
+    if (isKnownFetchError(error)) {  // if the error thrown is a known/expected fetch error there's no need to modify it
       throw error;
     }
 
-    throw new FetchPageError(getErrorMessage(error), true); // if its an unexpected error then we wrap it in the format
-  } finally {
-    clearTimeout(timeout);
+    throw retryableError(getErrorMessage(error)); // if its an unexpected error then we wrap it in the format
   }
-}
-
-class FetchPageError extends Error {
-  constructor(
-    message: string,
-    readonly retryable: boolean,
-    readonly retryAfterMs?: number,
-  ) {
-    super(message);
-  }
-}
-
-function isRetryableError(error: unknown): boolean {
-  return error instanceof FetchPageError && error.retryable;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function getRetryDelayMs(error: unknown, backoffDelayMs: number): number {
-  if (error instanceof FetchPageError && error.retryAfterMs !== undefined) {
-    return Math.max(backoffDelayMs, error.retryAfterMs);
-  }
-
-  return backoffDelayMs;
-}
-
-function getRateLimitRetryDelayMs(headers: Headers): number {
-  return parseRetryAfterMs(headers.get("retry-after")) ?? DEFAULT_RATE_LIMIT_RETRY_DELAY_MS;
 }
 
 function parseRetryAfterMs(retryAfter: string | null): number | null {
@@ -207,13 +178,7 @@ function parseRetryAfterMs(retryAfter: string | null): number | null {
     return delaySeconds * 1_000;
   }
 
-  const retryAfterDateMs = Date.parse(trimmedRetryAfter);
-
-  if (Number.isNaN(retryAfterDateMs)) {
-    return null;
-  }
-
-  return Math.max(0, retryAfterDateMs - Date.now());
+  return null;
 }
 
 function isHtmlContentType(contentType: string | null): boolean {
@@ -231,14 +196,6 @@ function isAbortError(error: unknown): boolean {  // this is for catching fetch 
     typeof error === "object" &&
     error !== null &&
     "name" in error &&
-    error.name === "AbortError"
+    (error.name === "AbortError" || error.name === "TimeoutError")
   );
-}   // why not just use promise.race with a timeout promise instead of abort controller ??
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
+}  

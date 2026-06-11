@@ -1,4 +1,4 @@
-import { extractLinks, extractLinksWithStats } from "../src/links";
+import { extractLinks } from "../src/links";
 
 describe("extractLinks", () => {
   const startUrl = "https://crawlme.monzo.com/";
@@ -11,11 +11,18 @@ describe("extractLinks", () => {
       <a href="/contact">Contact</a>
     `;
 
-    expect(extractLinks(html, currentPageUrl, startUrl)).toEqual([
-      "https://crawlme.monzo.com/docs/about",
-      "https://crawlme.monzo.com/blog",
-      "https://crawlme.monzo.com/contact",
-    ]);
+    expect(extractLinks(html, currentPageUrl, startUrl)).toMatchObject({
+      links: [
+        "https://crawlme.monzo.com/docs/about",
+        "https://crawlme.monzo.com/blog",
+        "https://crawlme.monzo.com/contact",
+      ],
+      crawlableLinks: [
+        "https://crawlme.monzo.com/docs/about",
+        "https://crawlme.monzo.com/blog",
+        "https://crawlme.monzo.com/contact",
+      ],
+    });
   });
 
   it("returns all HTTP links separately from same-host crawlable links", () => {
@@ -26,7 +33,7 @@ describe("extractLinks", () => {
       <a href="mailto:support@example.com">Email</a>
     `;
 
-    expect(extractLinksWithStats(html, currentPageUrl, startUrl)).toEqual({
+    expect(extractLinks(html, currentPageUrl, startUrl)).toEqual({
       links: [
         "https://crawlme.monzo.com/inside",
         "https://monzo.com/",
@@ -49,9 +56,10 @@ describe("extractLinks", () => {
       <a href="/valid">Valid</a>
     `;
 
-    expect(extractLinks(html, currentPageUrl, startUrl)).toEqual([
-      "https://crawlme.monzo.com/valid",
-    ]);
+    expect(extractLinks(html, currentPageUrl, startUrl)).toMatchObject({
+      links: ["https://crawlme.monzo.com/valid"],
+      crawlableLinks: ["https://crawlme.monzo.com/valid"],
+    });
   });
 
   it("deduplicates links after normalization while preserving first-seen order", () => {
@@ -62,14 +70,20 @@ describe("extractLinks", () => {
       <a href="https://CRAWLME.MONZO.COM/first">First duplicate</a>
     `;
 
-    expect(extractLinks(html, currentPageUrl, startUrl)).toEqual([
-      "https://crawlme.monzo.com/about",
-      "https://crawlme.monzo.com/first",
-    ]);
+    expect(extractLinks(html, currentPageUrl, startUrl)).toMatchObject({
+      links: [
+        "https://crawlme.monzo.com/about",
+        "https://crawlme.monzo.com/first",
+      ],
+      crawlableLinks: [
+        "https://crawlme.monzo.com/about",
+        "https://crawlme.monzo.com/first",
+      ],
+    });
   });
 
   it("returns empty results for pages with no usable anchors", () => {
-    expect(extractLinksWithStats("<main><p>No links here", currentPageUrl, startUrl)).toEqual({
+    expect(extractLinks("<main><p>No links here", currentPageUrl, startUrl)).toEqual({
       links: [],
       crawlableLinks: [],
       linksDiscovered: 0,
