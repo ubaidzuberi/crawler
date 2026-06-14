@@ -1,8 +1,8 @@
 import { extractLinks } from "../src/links";
 
 describe("extractLinks", () => {
-  const startUrl = "https://crawlme.monzo.com/";
-  const currentPageUrl = "https://crawlme.monzo.com/docs/page";
+  const startUrl = "https://testsite.example/";
+  const currentPageUrl = "https://testsite.example/docs/page";
 
   it("extracts anchor hrefs and returns normalized crawlable links", () => {
     const html = `
@@ -13,14 +13,14 @@ describe("extractLinks", () => {
 
     expect(extractLinks(html, currentPageUrl, startUrl)).toMatchObject({
       links: [
-        "https://crawlme.monzo.com/docs/about",
-        "https://crawlme.monzo.com/blog",
-        "https://crawlme.monzo.com/contact",
+        "https://testsite.example/docs/about",
+        "https://testsite.example/blog",
+        "https://testsite.example/contact",
       ],
       crawlableLinks: [
-        "https://crawlme.monzo.com/docs/about",
-        "https://crawlme.monzo.com/blog",
-        "https://crawlme.monzo.com/contact",
+        "https://testsite.example/docs/about",
+        "https://testsite.example/blog",
+        "https://testsite.example/contact",
       ],
     });
   });
@@ -28,18 +28,18 @@ describe("extractLinks", () => {
   it("returns all HTTP links separately from same-host crawlable links", () => {
     const html = `
       <a href="/inside">Inside</a>
-      <a href="https://monzo.com/">Parent domain</a>
-      <a href="https://community.monzo.com/">Other subdomain</a>
+      <a href="https://example.com/">Parent domain</a>
+      <a href="https://community.example/">Other subdomain</a>
       <a href="mailto:support@example.com">Email</a>
     `;
 
     expect(extractLinks(html, currentPageUrl, startUrl)).toEqual({
       links: [
-        "https://crawlme.monzo.com/inside",
-        "https://monzo.com/",
-        "https://community.monzo.com/",
+        "https://testsite.example/inside",
+        "https://example.com/",
+        "https://community.example/",
       ],
-      crawlableLinks: ["https://crawlme.monzo.com/inside"],
+      crawlableLinks: ["https://testsite.example/inside"],
       linksDiscovered: 4,
       linksIgnored: 1,
       duplicateLinks: 0,
@@ -57,8 +57,8 @@ describe("extractLinks", () => {
     `;
 
     expect(extractLinks(html, currentPageUrl, startUrl)).toMatchObject({
-      links: ["https://crawlme.monzo.com/valid"],
-      crawlableLinks: ["https://crawlme.monzo.com/valid"],
+      links: ["https://testsite.example/valid"],
+      crawlableLinks: ["https://testsite.example/valid"],
     });
   });
 
@@ -67,17 +67,17 @@ describe("extractLinks", () => {
       <a href="/about">About</a>
       <a href="/first">First</a>
       <a href="/about#team">About team</a>
-      <a href="https://CRAWLME.MONZO.COM/first">First duplicate</a>
+      <a href="https://TESTSITE.EXAMPLE/first">First duplicate</a>
     `;
 
     expect(extractLinks(html, currentPageUrl, startUrl)).toMatchObject({
       links: [
-        "https://crawlme.monzo.com/about",
-        "https://crawlme.monzo.com/first",
+        "https://testsite.example/about",
+        "https://testsite.example/first",
       ],
       crawlableLinks: [
-        "https://crawlme.monzo.com/about",
-        "https://crawlme.monzo.com/first",
+        "https://testsite.example/about",
+        "https://testsite.example/first",
       ],
     });
   });

@@ -41,6 +41,18 @@ export type FetchPageOptions = {
   isAllowedRedirect?: (url: string) => boolean;
 };
 
+type RedirectState = {
+  requestedUrl: string;
+  currentUrl: string;
+  redirectChain: string[];
+  redirectCount: number;
+  maxRedirects: number;
+};
+
+type RedirectTarget =
+  | { shouldRedirect: false }
+  | { shouldRedirect: true; nextUrl: string };
+
 export async function fetchPage(    // this is the retry wrapper. it wraps fetchPageOnce
   url: string,
   options: FetchPageOptions = {},
@@ -85,69 +97,44 @@ async function fetchPageOnce(
         signal,
       });
 
-      if (!REDIRECT_STATUSES.has(response.status)) {  // if not a redirect do the following
-        if (!response.ok) {   // if not a 2xx response do the following
-          const retryAfterMs =
-            response.status === 429
-              ? parseRetryAfterMs(response.headers.get("retry-after")) ??
-                DEFAULT_RATE_LIMIT_RETRY_DELAY_MS
-              : undefined;
-
-          const message = `Failed to fetch ${currentUrl}: ${response.status} ${response.statusText}`;
-
-          if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
-            throw retryableError(message, retryAfterMs);
-          }
-
-          throw nonRetryableError(message);
-        }
-
-        const contentType = response.headers.get("content-type");
-
-        if (!isHtmlContentType(contentType)) {
-          throw unsupportedContentTypeError(
-            `Unsupported content type for ${currentUrl}: ${contentType ?? "missing"}`,
-          );
-        }
-
-        return {
+      const redirectTarget = getRedirectTarget(
+        response,
+        {
           requestedUrl,
-          finalUrl: currentUrl,
-          html: await response.text(),
+          currentUrl,
           redirectChain,
-        };
+          redirectCount,
+          maxRedirects,
+        },
+        options,
+      );
+
+      if (redirectTarget.shouldRedirect) {
+        redirectChain.push(redirectTarget.nextUrl);
+        currentUrl = redirectTarget.nextUrl;
+        continue;
       }
 
-      if (redirectCount === maxRedirects) {   // stops if redirects exceed the limit
-        throw nonRetryableError(`Too many redirects fetching ${requestedUrl}`);
+      const httpError = createHttpError(response, currentUrl);
+
+      if (httpError) {
+        throw httpError;
       }
 
+      const contentType = response.headers.get("content-type");
 
-      // continue redirecting chain...
-      const location = response.headers.get("location");
-
-      if (!location || location.trim() === "") {
-        throw nonRetryableError(
-          `Redirect from ${currentUrl} is missing a Location header`,
+      if (!isHtmlContentType(contentType)) {
+        throw unsupportedContentTypeError(
+          `Unsupported content type for ${currentUrl}: ${contentType ?? "missing"}`,
         );
       }
 
-      const nextUrl = new URL(location, currentUrl).toString();
-
-      if (options.isAllowedRedirect && !options.isAllowedRedirect(nextUrl)) {
-        throw nonRetryableError(
-          `Redirect target is outside the crawl boundary: ${nextUrl}`,
-        );
-      }
-
-      if (redirectChain.includes(nextUrl)) {
-        throw nonRetryableError(
-          `Redirect loop detected while fetching ${requestedUrl}: ${nextUrl}`,
-        );
-      }
-
-      redirectChain.push(nextUrl);
-      currentUrl = nextUrl;
+      return {
+        requestedUrl,
+        finalUrl: currentUrl,
+        html: await response.text(),
+        redirectChain,
+      };
     }
 
     throw nonRetryableError(`Too many redirects fetching ${requestedUrl}`);
@@ -164,7 +151,68 @@ async function fetchPageOnce(
   }
 }
 
-function parseRetryAfterMs(retryAfter: string | null): number | null {
+export function createHttpError(
+  response: Pick<Response, "ok" | "status" | "statusText" | "headers">,
+  url: string,
+): Error | null {
+  if (response.ok) {
+    return null;
+  }
+
+  const retryAfterMs =
+    response.status === 429
+      ? parseRetryAfterMs(response.headers.get("retry-after")) ??
+        DEFAULT_RATE_LIMIT_RETRY_DELAY_MS
+      : undefined;
+
+  const message = `Failed to fetch ${url}: ${response.status} ${response.statusText}`;
+
+  if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
+    return retryableError(message, retryAfterMs);
+  }
+
+  return nonRetryableError(message);
+}
+
+export function getRedirectTarget(
+  response: Pick<Response, "status" | "headers">,
+  state: RedirectState,
+  options: Pick<FetchPageOptions, "isAllowedRedirect"> = {},
+): RedirectTarget {
+  if (!REDIRECT_STATUSES.has(response.status)) {
+    return { shouldRedirect: false };
+  }
+
+  if (state.redirectCount === state.maxRedirects) {
+    throw nonRetryableError(`Too many redirects fetching ${state.requestedUrl}`);
+  }
+
+  const location = response.headers.get("location");
+
+  if (!location || location.trim() === "") {
+    throw nonRetryableError(
+      `Redirect from ${state.currentUrl} is missing a Location header`,
+    );
+  }
+
+  const nextUrl = new URL(location, state.currentUrl).toString();
+
+  if (options.isAllowedRedirect && !options.isAllowedRedirect(nextUrl)) {
+    throw nonRetryableError(
+      `Redirect target is outside the crawl boundary: ${nextUrl}`,
+    );
+  }
+
+  if (state.redirectChain.includes(nextUrl)) {
+    throw nonRetryableError(
+      `Redirect loop detected while fetching ${state.requestedUrl}: ${nextUrl}`,
+    );
+  }
+
+  return { shouldRedirect: true, nextUrl };
+}
+
+export function parseRetryAfterMs(retryAfter: string | null): number | null {
   if (!retryAfter) {
     return null;
   }
@@ -179,7 +227,7 @@ function parseRetryAfterMs(retryAfter: string | null): number | null {
   return null;
 }
 
-function isHtmlContentType(contentType: string | null): boolean {
+export function isHtmlContentType(contentType: string | null): boolean {
   if (!contentType) {
     return false;
   }
@@ -189,7 +237,7 @@ function isHtmlContentType(contentType: string | null): boolean {
   return mediaType === "text/html" || mediaType === "application/xhtml+xml";
 }
 
-function isAbortError(error: unknown): boolean {  // this is for catching fetch timeout errors
+export function isAbortError(error: unknown): boolean {  // this is for catching fetch timeout errors
   return (
     typeof error === "object" &&
     error !== null &&

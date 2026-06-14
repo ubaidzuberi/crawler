@@ -4,26 +4,26 @@ import {
 } from "../src/url-utils";
 
 describe("normalizeHttpUrl", () => {
-  const currentPageUrl = "https://crawlme.monzo.com/docs/page";
+  const currentPageUrl = "https://testsite.example/docs/page";
 
   it("normalizes HTTP URLs without applying the crawl boundary", () => {
-    expect(normalizeHttpUrl("https://MONZO.COM:443/about#team", currentPageUrl)).toBe(
-      "https://monzo.com/about",
+    expect(normalizeHttpUrl("https://EXAMPLE.COM:443/about#team", currentPageUrl)).toBe(
+      "https://example.com/about",
     );
   });
 
   it("resolves relative and protocol-relative URLs", () => {
     expect(normalizeHttpUrl("./about", currentPageUrl)).toBe(
-      "https://crawlme.monzo.com/docs/about",
+      "https://testsite.example/docs/about",
     );
     expect(normalizeHttpUrl("../blog", currentPageUrl)).toBe(
-      "https://crawlme.monzo.com/blog",
+      "https://testsite.example/blog",
     );
     expect(normalizeHttpUrl("/contact", currentPageUrl)).toBe(
-      "https://crawlme.monzo.com/contact",
+      "https://testsite.example/contact",
     );
-    expect(normalizeHttpUrl("//monzo.com/about", currentPageUrl)).toBe(
-      "https://monzo.com/about",
+    expect(normalizeHttpUrl("//example.com/about", currentPageUrl)).toBe(
+      "https://example.com/about",
     );
   });
 
@@ -32,7 +32,7 @@ describe("normalizeHttpUrl", () => {
       "mailto:support@example.com",
       "tel:+441234567890",
       "javascript:void(0)",
-      "ftp://crawlme.monzo.com/file",
+      "ftp://testsite.example/file",
       "https://",
     ]) {
       expect(normalizeHttpUrl(href, currentPageUrl)).toBeNull();
@@ -41,20 +41,20 @@ describe("normalizeHttpUrl", () => {
 });
 
 describe("isWithinCrawlBoundary", () => {
-  const startUrl = "https://crawlme.monzo.com/";
+  const startUrl = "https://testsite.example/";
 
   it("uses an exact same-host policy", () => {
-    expect(isWithinCrawlBoundary("https://crawlme.monzo.com/about", startUrl)).toBe(
+    expect(isWithinCrawlBoundary("https://testsite.example/about", startUrl)).toBe(
       true,
     );
-    expect(isWithinCrawlBoundary("http://crawlme.monzo.com/about", startUrl)).toBe(
+    expect(isWithinCrawlBoundary("http://testsite.example/about", startUrl)).toBe(
       true,
     );
-    expect(isWithinCrawlBoundary("https://monzo.com/", startUrl)).toBe(false);
-    expect(isWithinCrawlBoundary("https://community.monzo.com/", startUrl)).toBe(
+    expect(isWithinCrawlBoundary("https://example.com/", startUrl)).toBe(false);
+    expect(isWithinCrawlBoundary("https://community.example/", startUrl)).toBe(
       false,
     );
-    expect(isWithinCrawlBoundary("https://www.crawlme.monzo.com/", startUrl)).toBe(
+    expect(isWithinCrawlBoundary("https://www.testsite.example/", startUrl)).toBe(
       false,
     );
   });

@@ -8,6 +8,7 @@ This document captures the expectations for reviewing this take-home crawler aga
 - The solution should show senior-level maturity through clear tradeoffs, simple design, correctness, and explainability.
 - The exercise is timeboxed to around 4 hours, so unnecessary complexity should be treated as a negative signal.
 - The follow-up interview will involve discussing the implementation live, so the code should be easy to explain and defend.
+- A read me will be added later so ignore it being missing for now, also ignore any comments or stats related code, that will all be removed before submission.
 
 ## Assignment Requirements
 
@@ -87,3 +88,5 @@ Use these questions when assessing the solution:
 - Is the testing reasonable? is anything missing or untested? does the testing strategy make sense? should any tests be added or removed? 
 - Are there fintech-relevant maturity concerns, such as unsafe defaults, unclear failure handling, or brittle behavior?
 - is the folder and file structure fine? should it be organised better? are the file names clear and useful?
+- does the code look ai generated? what about the test cases?
+- is the test appraoch correct? unnneccessary mocking and was avoided. The intention was to have pure unit tests, orchestration tests and integration tests. does the testing approach seem realistic for the time given? does the seperation make sense? is there redundant overlap? are the sepeation of concerns between the different testing level clear and coherent?
