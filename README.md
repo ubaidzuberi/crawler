@@ -10,6 +10,8 @@ npm install
 
 ## Run
 
+The start URL must include the `http` or `https` protocol.
+
 ```bash
 npm run crawl -- https://crawlme.monzo.com/
 ```
@@ -120,9 +122,13 @@ npm run typecheck
 
 Rate limits are usually handled with both prevention and cooldowns. Given more time, I would've added a cooldown, so if any worker received a `429`, all workers would pause until the `Retry-After` period has passed. I chose not to add that here because coordinating and testing a shared cooldown across concurrent workers would add extra complexity within the timebox.
 
-Instead, this crawler handles rate limiting in two simpler ways. Firstly, `--concurrency` and `--delay-ms` let the caller reduce crawl pressure and lower the chance of hitting rate limits in the first place. Secondly, when a URL receives a `429`, the fetch layer respects `Retry-After` for that URL's retry, using the larger of the exponential backoff delay and the `Retry-After` delay.
+Instead, this crawler handles rate limiting in two simpler ways. Firstly, `--concurrency` and `--delay-ms` let the caller reduce crawl pressure and lower the chance of hitting rate limits in the first place. `--concurrency` controls the number of workers, while `--delay-ms` adds a delay before each worker starts a request. This is not a strict global rate limiter. Because workers start together, the crawler can still make an initial burst of requests. After the first few requests, workers complete at different times depending on server response times, so the delay acts as per-worker spacing between successive requests.
+
+Secondly, when a URL receives a `429`, the fetch layer respects `Retry-After` for that URL's retry, using the larger of the exponential backoff delay and the `Retry-After` delay.
 
 The trade-off is that other workers may continue making requests while one URL is waiting to retry, so this is not a complete rate-limiting strategy. It is a simpler prevention-focused approach with per-request cooldown behaviour. Since the crawler targets a single host, `--concurrency` and `--delay-ms` can be tuned for that host if rate limits appear.
+
+A caveat with the initial delay-ms 
 
 ### Manual redirect handling
 
