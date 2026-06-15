@@ -147,14 +147,13 @@ describe("fetchPage", () => {
     jest.restoreAllMocks();
   });
 
-  it("returns the requested URL, final URL, response body, and redirect chain", async () => {
+  it("returns the requested URL, final URL, and response body", async () => {
     global.fetch = jest.fn().mockResolvedValue(createHtmlResponse("<html></html>"));
 
     await expect(fetchPage("https://testsite.example/start")).resolves.toEqual({
       requestedUrl: "https://testsite.example/start",
       finalUrl: "https://testsite.example/start",
       html: "<html></html>",
-      redirectChain: ["https://testsite.example/start"],
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
@@ -187,11 +186,6 @@ describe("fetchPage", () => {
       requestedUrl: "https://testsite.example/start",
       finalUrl: "https://testsite.example/final",
       html: "<html></html>",
-      redirectChain: [
-        "https://testsite.example/start",
-        "https://testsite.example/middle",
-        "https://testsite.example/final",
-      ],
     });
 
     expect(global.fetch).toHaveBeenNthCalledWith(
@@ -226,7 +220,6 @@ describe("fetchPage", () => {
       requestedUrl: "https://testsite.example/flaky",
       finalUrl: "https://testsite.example/flaky",
       html: "<html></html>",
-      redirectChain: ["https://testsite.example/flaky"],
     });
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
@@ -300,7 +293,7 @@ function createRedirectState(
   return {
     requestedUrl: "https://testsite.example/start",
     currentUrl: "https://testsite.example/start",
-    redirectChain: ["https://testsite.example/start"],
+    visitedRedirects: new Set(["https://testsite.example/start"]),
     redirectCount: 0,
     maxRedirects: 20,
     ...overrides,

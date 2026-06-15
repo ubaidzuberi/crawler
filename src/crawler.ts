@@ -24,19 +24,6 @@ export type CrawlFailure = {
 export type CrawlResult = {
   pages: CrawledPage[];
   failures: CrawlFailure[];
-  stats: CrawlStats;
-};
-
-export type CrawlStats = {
-  startUrl: string;
-  pagesVisited: number;
-  linksDiscovered: number;
-  internalLinksQueued: number;
-  linksIgnored: number;
-  failedFetches: number;
-  duplicateUrlsSkipped: number;
-  redirectsFollowed: number;
-  redirectDuplicatesSkipped: number;
 };
 
 export type CrawlOptions = {
@@ -61,23 +48,12 @@ export async function crawl(
   const requestDelayMs = options.requestDelayMs ?? DEFAULT_REQUEST_DELAY_MS;
   const pages: CrawledPage[] = [];
   const failures: CrawlFailure[] = [];
-  const stats: CrawlStats = {
-    startUrl: crawlStartUrl,
-    pagesVisited: 0,
-    linksDiscovered: 0,
-    internalLinksQueued: 0,
-    linksIgnored: 0,
-    failedFetches: 0,
-    duplicateUrlsSkipped: 0,
-    redirectsFollowed: 0,
-    redirectDuplicatesSkipped: 0,
-  };
   const queue = [crawlStartUrl];
   const seen = new Set(queue);
   const crawled = new Set<string>();
   let inFlight = 0;
   let queueIndex = 0;
-  let waiters: Array<() => void> = [];  
+  let waiters: Array<() => void> = [];
 
   function takeNextUrl(): string | null {
     if (queueIndex >= queue.length) {
@@ -91,16 +67,14 @@ export async function crawl(
     return requestedUrl;
   }
 
-  function enqueueIfNew(url: string): boolean {
+  function enqueueIfNew(url: string): void {
     if (seen.has(url)) {
-      return false;
+      return;
     }
 
     seen.add(url);
     queue.push(url);
     notifyStateChanged();
-
-    return true;
   }
 
   function waitForStateChange(): Promise<void> {
@@ -120,11 +94,10 @@ export async function crawl(
 
   function recordFailure(failure: CrawlFailure): void {
     failures.push(failure);
-    stats.failedFetches += 1;
     options.onFailure?.(failure);
   }
 
-  async function processUrl(requestedUrl: string): Promise<void> {  // fetch urls till enqueing
+  async function processUrl(requestedUrl: string): Promise<void> {
     let fetchedPage: FetchedPage;
 
     try {
@@ -157,47 +130,29 @@ export async function crawl(
       return;
     }
 
-    stats.redirectsFollowed += countRedirects(
-      fetchedPage.redirectChain,
-      requestedUrl,
-      finalUrl,
-    );
-
     if (crawled.has(finalUrl)) {
-      stats.redirectDuplicatesSkipped += 1;
       return;
     }
 
     crawled.add(finalUrl);
 
-    const extractedLinks = extractLinks(
+    const { links, crawlableLinks } = extractLinks(
       fetchedPage.html,
       finalUrl,
       crawlStartUrl,
     );
-    const links = extractedLinks.links;
-    const crawlableLinks = extractedLinks.crawlableLinks;
-
-    stats.linksDiscovered += extractedLinks.linksDiscovered;
-    stats.linksIgnored += extractedLinks.linksIgnored;
-    stats.duplicateUrlsSkipped += extractedLinks.duplicateLinks;
 
     const crawledPage = { url: finalUrl, links };
 
     pages.push(crawledPage);
-    stats.pagesVisited += 1;
     options.onPage?.(crawledPage);
 
     for (const link of crawlableLinks) {
-      if (enqueueIfNew(link)) {
-        stats.internalLinksQueued += 1;
-      } else {
-        stats.duplicateUrlsSkipped += 1;
-      }
+      enqueueIfNew(link);
     }
   }
 
-  async function runWorker(): Promise<void> { // repeatedly claim urls and process them
+  async function runWorker(): Promise<void> {
     while (true) {
       if (queueIndex >= queue.length) {
         if (inFlight === 0) {
@@ -233,17 +188,5 @@ export async function crawl(
     }),
   );
 
-  return { pages, failures, stats };
-}
-
-function countRedirects(
-  redirectChain: string[] | undefined,
-  requestedUrl: string,
-  finalUrl: string,
-): number {
-  if (redirectChain) {
-    return Math.max(0, redirectChain.length - 1);
-  }
-
-  return requestedUrl === finalUrl ? 0 : 1;
+  return { pages, failures };
 }

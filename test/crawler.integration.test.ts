@@ -3,14 +3,14 @@ import type { AddressInfo } from "node:net";
 import { crawl } from "../src/crawler";
 
 describe("crawl integration", () => {
-  it("crawls a local site through real HTTP responses", async () => {
+  it("crawls a local site through real HTTP responses and redirects", async () => {
     const server = await startTestServer((request, response) => {
       if (request.url === "/") {
         sendHtml(
           response,
           `
             <a href="/about">About</a>
-            <a href="/careers">Careers</a>
+            <a href="/old-careers">Careers</a>
             <a href="https://external.example/">External</a>
           `,
         );
@@ -19,6 +19,12 @@ describe("crawl integration", () => {
 
       if (request.url === "/about") {
         sendHtml(response, `<a href="/">Home</a>`);
+        return;
+      }
+
+      if (request.url === "/old-careers") {
+        response.writeHead(302, { location: "/careers" });
+        response.end();
         return;
       }
 
@@ -35,7 +41,7 @@ describe("crawl integration", () => {
       const result = await crawl(`${server.baseUrl}/`, { requestDelayMs: 0 });
 
       expect(new Set(server.requests)).toEqual(
-        new Set(["/", "/about", "/careers"]),
+        new Set(["/", "/about", "/old-careers", "/careers"]),
       );
       expect(new Set(result.pages.map((page) => page.url))).toEqual(
         new Set([
@@ -48,50 +54,11 @@ describe("crawl integration", () => {
         url: `${server.baseUrl}/`,
         links: [
           `${server.baseUrl}/about`,
-          `${server.baseUrl}/careers`,
+          `${server.baseUrl}/old-careers`,
           "https://external.example/",
         ],
       });
       expect(result.failures).toEqual([]);
-      expect(result.stats.pagesVisited).toBe(3);
-      expect(result.stats.internalLinksQueued).toBe(2);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("follows real HTTP redirects and records the final URL", async () => {
-    const server = await startTestServer((request, response) => {
-      if (request.url === "/") {
-        sendHtml(response, `<a href="/old-about">Old About</a>`);
-        return;
-      }
-
-      if (request.url === "/old-about") {
-        response.writeHead(302, { location: "/about" });
-        response.end();
-        return;
-      }
-
-      if (request.url === "/about") {
-        sendHtml(response, "");
-        return;
-      }
-
-      response.writeHead(404);
-      response.end("Not found");
-    });
-
-    try {
-      const result = await crawl(`${server.baseUrl}/`, { requestDelayMs: 0 });
-
-      expect(server.requests).toEqual(["/", "/old-about", "/about"]);
-      expect(result.pages.map((page) => page.url)).toEqual([
-        `${server.baseUrl}/`,
-        `${server.baseUrl}/about`,
-      ]);
-      expect(result.failures).toEqual([]);
-      expect(result.stats.redirectsFollowed).toBe(1);
     } finally {
       await server.close();
     }

@@ -1,6 +1,6 @@
 const CRAWLABLE_PROTOCOLS = new Set(["http:", "https:"]);
 
-export function normalizeHttpUrl(   // normalises the URL and checks if it's valid
+export function normalizeHttpUrl(
   href: string,
   currentPageUrl: string,
 ): string | null {
@@ -11,15 +11,15 @@ export function normalizeHttpUrl(   // normalises the URL and checks if it's val
       return null;
     }
 
-    candidate.hash = "";    // removes fragments, so #.. that is in the URL is removed
+    candidate.hash = "";
 
-    return candidate.toString();    // returns the normlalised and cleaned URL as a string
+    return candidate.toString();
   } catch {
     return null;
   }
 }
 
-export function isWithinCrawlBoundary(url: string, startUrl: string): boolean {   // checks if the URL is within the same hostname as the start URL
+export function isWithinCrawlBoundary(url: string, startUrl: string): boolean {
   const start = new URL(startUrl);
   const candidate = new URL(url);
 

@@ -66,6 +66,8 @@ describe("crawl", () => {
   });
 
   it("records fetch failures and continues crawling queued URLs", async () => {
+    const onPage = jest.fn();
+    const onFailure = jest.fn();
     const fetcher = jest.fn(async (url: string): Promise<FetchedPage> => {
       if (url === "https://testsite.example/broken") {
         throw new Error("Not Found");
@@ -88,6 +90,8 @@ describe("crawl", () => {
 
     const result = await crawl("https://testsite.example/", {
       fetcher,
+      onFailure,
+      onPage,
       requestDelayMs: 0,
     });
 
@@ -101,6 +105,23 @@ describe("crawl", () => {
         error: "Not Found",
       },
     ]);
+    expect(onPage).toHaveBeenCalledTimes(2);
+    expect(onPage).toHaveBeenCalledWith({
+      url: "https://testsite.example/",
+      links: [
+        "https://testsite.example/broken",
+        "https://testsite.example/working",
+      ],
+    });
+    expect(onPage).toHaveBeenCalledWith({
+      url: "https://testsite.example/working",
+      links: [],
+    });
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onFailure).toHaveBeenCalledWith({
+      url: "https://testsite.example/broken",
+      error: "Not Found",
+    });
   });
 
   it("silently skips non-HTML pages", async () => {

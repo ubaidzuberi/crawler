@@ -40,9 +40,6 @@ describe("extractLinks", () => {
         "https://community.example/",
       ],
       crawlableLinks: ["https://testsite.example/inside"],
-      linksDiscovered: 4,
-      linksIgnored: 1,
-      duplicateLinks: 0,
     });
   });
 
@@ -86,9 +83,6 @@ describe("extractLinks", () => {
     expect(extractLinks("<main><p>No links here", currentPageUrl, startUrl)).toEqual({
       links: [],
       crawlableLinks: [],
-      linksDiscovered: 0,
-      linksIgnored: 0,
-      duplicateLinks: 0,
     });
   });
 });

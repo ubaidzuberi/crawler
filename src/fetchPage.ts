@@ -13,7 +13,6 @@ export type FetchedPage = {
   requestedUrl: string;
   finalUrl: string;
   html: string;
-  redirectChain?: string[];
 };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -23,15 +22,6 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 1_000;
 const DEFAULT_RATE_LIMIT_RETRY_DELAY_MS = 5_000;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const RETRYABLE_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
-
-/*
-This is the crawlers network layer, it:
-1. takes a url
-2. fetches the page with retries and timeouts for safety
-3. follows redirects up to a limit, ensuring they are within the crawl boundary
-4. reject non-HTML content types
-5. return the final url (after redirects), the HTML, and the chain of redirects followed
-*/
 
 export type FetchPageOptions = {
   timeoutMs?: number;
@@ -44,7 +34,7 @@ export type FetchPageOptions = {
 type RedirectState = {
   requestedUrl: string;
   currentUrl: string;
-  redirectChain: string[];
+  visitedRedirects: Set<string>;
   redirectCount: number;
   maxRedirects: number;
 };
@@ -53,7 +43,7 @@ type RedirectTarget =
   | { shouldRedirect: false }
   | { shouldRedirect: true; nextUrl: string };
 
-export async function fetchPage(    // this is the retry wrapper. it wraps fetchPageOnce
+export async function fetchPage(
   url: string,
   options: FetchPageOptions = {},
 ): Promise<FetchedPage> {
@@ -72,14 +62,14 @@ export async function fetchPage(    // this is the retry wrapper. it wraps fetch
         throw error;
       }
 
-      await delay(getRetryDelayMs(error, retryBaseDelayMs * 2 ** attempt));   // worker waits for some time before retrying
+      await delay(getRetryDelayMs(error, retryBaseDelayMs * 2 ** attempt));
     }
   }
 
   throw lastError;
 }
 
-async function fetchPageOnce(   
+async function fetchPageOnce(
   url: string,
   options: FetchPageOptions,
 ): Promise<FetchedPage> {
@@ -87,7 +77,7 @@ async function fetchPageOnce(
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const signal = AbortSignal.timeout(timeoutMs);
   const requestedUrl = new URL(url).toString();
-  const redirectChain = [requestedUrl];     // for tracking the redirecdt chain for this request
+  const visitedRedirects = new Set([requestedUrl]);
   let currentUrl = requestedUrl;
 
   try {
@@ -102,7 +92,7 @@ async function fetchPageOnce(
         {
           requestedUrl,
           currentUrl,
-          redirectChain,
+          visitedRedirects,
           redirectCount,
           maxRedirects,
         },
@@ -110,7 +100,7 @@ async function fetchPageOnce(
       );
 
       if (redirectTarget.shouldRedirect) {
-        redirectChain.push(redirectTarget.nextUrl);
+        visitedRedirects.add(redirectTarget.nextUrl);
         currentUrl = redirectTarget.nextUrl;
         continue;
       }
@@ -133,7 +123,6 @@ async function fetchPageOnce(
         requestedUrl,
         finalUrl: currentUrl,
         html: await response.text(),
-        redirectChain,
       };
     }
 
@@ -143,11 +132,11 @@ async function fetchPageOnce(
       throw retryableError(`Timed out fetching ${currentUrl} after ${timeoutMs}ms`);
     }
 
-    if (isKnownFetchError(error)) {  // if the error thrown is a known/expected fetch error there's no need to modify it
+    if (isKnownFetchError(error)) {
       throw error;
     }
 
-    throw retryableError(getErrorMessage(error)); // if its an unexpected error then we wrap it in the format
+    throw retryableError(getErrorMessage(error));
   }
 }
 
@@ -203,7 +192,7 @@ export function getRedirectTarget(
     );
   }
 
-  if (state.redirectChain.includes(nextUrl)) {
+  if (state.visitedRedirects.has(nextUrl)) {
     throw nonRetryableError(
       `Redirect loop detected while fetching ${state.requestedUrl}: ${nextUrl}`,
     );
@@ -237,11 +226,11 @@ export function isHtmlContentType(contentType: string | null): boolean {
   return mediaType === "text/html" || mediaType === "application/xhtml+xml";
 }
 
-export function isAbortError(error: unknown): boolean {  // this is for catching fetch timeout errors
+export function isAbortError(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "name" in error &&
     (error.name === "AbortError" || error.name === "TimeoutError")
   );
-}  
+}

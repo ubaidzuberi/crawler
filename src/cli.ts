@@ -12,7 +12,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    const result = await crawl(args.startUrl, {
+    await crawl(args.startUrl, {
       requestDelayMs: args.delayMs,
       onPage: (page) => {
         console.log(page.url);
@@ -26,28 +26,18 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log("\nCrawl complete");
-    console.log(`Start URL: ${result.stats.startUrl}`);
-    console.log(`Pages visited: ${result.stats.pagesVisited}`);
-    console.log(`Links discovered: ${result.stats.linksDiscovered}`);
-    console.log(`Internal links queued: ${result.stats.internalLinksQueued}`);
-    console.log(`Ignored links: ${result.stats.linksIgnored}`);
-    console.log(`Failed fetches: ${result.stats.failedFetches}`);
-    console.log(`Duplicate URLs skipped: ${result.stats.duplicateUrlsSkipped}`);
-    console.log(`Redirects followed: ${result.stats.redirectsFollowed}`);
-    console.log(`Redirect duplicates skipped: ${result.stats.redirectDuplicatesSkipped}`);
   } catch (error) {
     console.error(getErrorMessage(error));
     process.exitCode = 1;
   }
 }
 
-type CliArgs = {
+export type CliArgs = {
   startUrl?: string;
   delayMs?: number;
 };
 
-function readCliArgs(args: string[]): CliArgs {
+export function readCliArgs(args: string[]): CliArgs {
   const parsed = parseArgs({
     args,
     allowPositionals: true,
@@ -81,4 +71,6 @@ function parseDelayMs(value: string): number {
   return delayMs;
 }
 
-void main();
+if (require.main === module) {
+  void main();
+}
