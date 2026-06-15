@@ -190,11 +190,12 @@ describe("crawl", () => {
     ]);
   });
 
-  it("fetches queued pages concurrently without exceeding the worker limit", async () => {
+  it("fetches queued pages concurrently without exceeding the configured limit", async () => {
     const childUrls = Array.from(
       { length: 10 },
       (_, index) => `https://testsite.example/page-${index}`,
     );
+    const concurrency = 3;
     const pendingResolves: Array<() => void> = [];
     let activeFetches = 0;
     let maxActiveFetches = 0;
@@ -232,11 +233,12 @@ describe("crawl", () => {
     });
 
     const crawlPromise = crawl("https://testsite.example/", {
+      concurrency,
       fetcher,
       requestDelayMs: 0,
     });
 
-    await waitUntil(() => pendingResolves.length === 5);
+    await waitUntil(() => pendingResolves.length === concurrency);
 
     while (startedChildFetches < childUrls.length) {
       const currentBatch = pendingResolves.splice(0);
@@ -251,8 +253,17 @@ describe("crawl", () => {
     await crawlPromise;
 
     expect(maxActiveFetches).toBeGreaterThan(1);
-    expect(maxActiveFetches).toBeLessThanOrEqual(5);
+    expect(maxActiveFetches).toBeLessThanOrEqual(concurrency);
     expect(fetcher).toHaveBeenCalledTimes(11);
+  });
+
+  it("rejects invalid concurrency values", async () => {
+    await expect(
+      crawl("https://testsite.example/", {
+        concurrency: 0,
+        requestDelayMs: 0,
+      }),
+    ).rejects.toThrow("concurrency must be a positive integer");
   });
 
   it("waits before request starts when request delay is configured", async () => {

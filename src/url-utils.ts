@@ -19,9 +19,8 @@ export function normalizeHttpUrl(
   }
 }
 
-export function isWithinCrawlBoundary(url: string, startUrl: string): boolean {
-  const start = new URL(startUrl);
+export function isWithinCrawlBoundary(url: string, startUrl: URL): boolean {
   const candidate = new URL(url);
 
-  return candidate.hostname === start.hostname;
+  return candidate.hostname === startUrl.hostname;
 }

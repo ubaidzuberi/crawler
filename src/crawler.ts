@@ -8,7 +8,7 @@ import { getErrorMessage, isUnsupportedContentTypeError } from "./errors";
 import { extractLinks } from "./links";
 import { isWithinCrawlBoundary, normalizeHttpUrl } from "./url-utils";
 
-const WORKER_COUNT = 5;
+const DEFAULT_CONCURRENCY = 5;
 const DEFAULT_REQUEST_DELAY_MS = 500;
 
 export type CrawledPage = {
@@ -28,6 +28,7 @@ export type CrawlResult = {
 
 export type CrawlOptions = {
   fetcher?: (url: string, options?: FetchPageOptions) => Promise<FetchedPage>;
+  concurrency?: number;
   requestDelayMs?: number;
   onPage?: (page: CrawledPage) => void;
   onFailure?: (failure: CrawlFailure) => void;
@@ -43,17 +44,22 @@ export async function crawl(
     throw new Error(`Invalid start URL: ${startUrl}`);
   }
 
-  const crawlStartUrl = normalizedStartUrl;
+  const crawlStartUrl = new URL(normalizedStartUrl);
   const fetcher = options.fetcher ?? fetchPage;
+  const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
   const requestDelayMs = options.requestDelayMs ?? DEFAULT_REQUEST_DELAY_MS;
   const pages: CrawledPage[] = [];
   const failures: CrawlFailure[] = [];
-  const queue = [crawlStartUrl];
+  const queue = [crawlStartUrl.toString()];
   const seen = new Set(queue);
   const crawled = new Set<string>();
   let inFlight = 0;
   let queueIndex = 0;
   let waiters: Array<() => void> = [];
+
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error("concurrency must be a positive integer");
+  }
 
   function takeNextUrl(): string | null {
     if (queueIndex >= queue.length) {
@@ -163,27 +169,23 @@ export async function crawl(
         continue;
       }
 
-      const requestedUrl = takeNextUrl();
+      const requestedUrl = takeNextUrl()!;
 
-      if (requestedUrl) {
-        try {
-          if (requestDelayMs > 0) {
-            await delay(requestDelayMs);
-          }
-
-          await processUrl(requestedUrl);
-        } finally {
-          inFlight -= 1;
-          notifyStateChanged();
+      try {
+        if (requestDelayMs > 0) {
+          await delay(requestDelayMs);
         }
 
-        continue;
+        await processUrl(requestedUrl);
+      } finally {
+        inFlight -= 1;
+        notifyStateChanged();
       }
     }
   }
 
   await Promise.all(
-    Array.from({ length: WORKER_COUNT }, async () => {
+    Array.from({ length: concurrency }, async () => {
       await runWorker();
     }),
   );

@@ -41,7 +41,7 @@ describe("normalizeHttpUrl", () => {
 });
 
 describe("isWithinCrawlBoundary", () => {
-  const startUrl = "https://testsite.example/";
+  const startUrl = new URL("https://testsite.example/");
 
   it("uses an exact same-host policy", () => {
     expect(isWithinCrawlBoundary("https://testsite.example/about", startUrl)).toBe(

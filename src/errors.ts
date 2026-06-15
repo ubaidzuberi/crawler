@@ -1,51 +1,57 @@
-type FetchError = Error & {
-  retryable?: boolean;
-  retryAfterMs?: number;
-  unsupportedContentType?: boolean;
-};
+export class RetryableFetchError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+    this.name = "RetryableFetchError";
+  }
+}
+
+export class NonRetryableFetchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NonRetryableFetchError";
+  }
+}
+
+export class UnsupportedContentTypeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnsupportedContentTypeError";
+  }
+}
 
 export function retryableError(
   message: string,
   retryAfterMs?: number,
-): FetchError {
-  return Object.assign(new Error(message), {
-    retryable: true,
-    retryAfterMs,
-  });
+): RetryableFetchError {
+  return new RetryableFetchError(message, retryAfterMs);
 }
 
-export function nonRetryableError(message: string): FetchError {
-  return Object.assign(new Error(message), {
-    retryable: false,
-  });
+export function nonRetryableError(message: string): NonRetryableFetchError {
+  return new NonRetryableFetchError(message);
 }
 
-export function unsupportedContentTypeError(message: string): FetchError {
-  return Object.assign(new Error(message), {
-    unsupportedContentType: true,
-  });
+export function unsupportedContentTypeError(
+  message: string,
+): UnsupportedContentTypeError {
+  return new UnsupportedContentTypeError(message);
 }
 
 export function isUnsupportedContentTypeError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "unsupportedContentType" in error &&
-    error.unsupportedContentType === true
-  );
+  return error instanceof UnsupportedContentTypeError;
 }
 
 export function isRetryableError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "retryable" in error &&
-    error.retryable === true
-  );
+  return error instanceof RetryableFetchError;
 }
 
 export function isKnownFetchError(error: unknown): boolean {
   return (
-    error instanceof Error &&
-    ("retryable" in error || "unsupportedContentType" in error)
+    error instanceof RetryableFetchError ||
+    error instanceof NonRetryableFetchError ||
+    error instanceof UnsupportedContentTypeError
   );
 }
 
@@ -53,11 +59,7 @@ export function getRetryDelayMs(
   error: unknown,
   backoffDelayMs: number,
 ): number {
-  if (
-    error instanceof Error &&
-    "retryAfterMs" in error &&
-    typeof error.retryAfterMs === "number"
-  ) {
+  if (error instanceof RetryableFetchError && error.retryAfterMs !== undefined) {
     return Math.max(backoffDelayMs, error.retryAfterMs);
   }
 

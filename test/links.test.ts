@@ -1,7 +1,7 @@
 import { extractLinks } from "../src/links";
 
 describe("extractLinks", () => {
-  const startUrl = "https://testsite.example/";
+  const startUrl = new URL("https://testsite.example/");
   const currentPageUrl = "https://testsite.example/docs/page";
 
   it("extracts anchor hrefs and returns normalized crawlable links", () => {

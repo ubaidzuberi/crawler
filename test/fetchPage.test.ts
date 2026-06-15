@@ -6,7 +6,11 @@ import {
   isHtmlContentType,
   parseRetryAfterMs,
 } from "../src/fetchPage";
-import { getRetryDelayMs } from "../src/errors";
+import {
+  getRetryDelayMs,
+  NonRetryableFetchError,
+  RetryableFetchError,
+} from "../src/errors";
 
 describe("fetchPage policy", () => {
   it("accepts supported HTML content types", () => {
@@ -31,18 +35,13 @@ describe("fetchPage policy", () => {
       "https://testsite.example/missing",
     );
 
-    expect(retryableError).toEqual(
-      expect.objectContaining({
-        message:
-          "Failed to fetch https://testsite.example/flaky: 503 Service Unavailable",
-        retryable: true,
-      }),
+    expect(retryableError).toBeInstanceOf(RetryableFetchError);
+    expect(retryableError?.message).toBe(
+      "Failed to fetch https://testsite.example/flaky: 503 Service Unavailable",
     );
-    expect(permanentError).toEqual(
-      expect.objectContaining({
-        message: "Failed to fetch https://testsite.example/missing: 404 Not Found",
-        retryable: false,
-      }),
+    expect(permanentError).toBeInstanceOf(NonRetryableFetchError);
+    expect(permanentError?.message).toBe(
+      "Failed to fetch https://testsite.example/missing: 404 Not Found",
     );
   });
 

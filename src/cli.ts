@@ -7,12 +7,15 @@ async function main(): Promise<void> {
     const args = readCliArgs(process.argv.slice(2));
 
     if (!args.startUrl) {
-      console.error("Usage: npm run crawl -- <url> [--delay-ms <milliseconds>]");
+      console.error(
+        "Usage: npm run crawl -- <url> [--delay-ms <milliseconds>] [--concurrency <count>]",
+      );
       process.exitCode = 1;
       return;
     }
 
     await crawl(args.startUrl, {
+      concurrency: args.concurrency,
       requestDelayMs: args.delayMs,
       onPage: (page) => {
         console.log(page.url);
@@ -34,6 +37,7 @@ async function main(): Promise<void> {
 
 export type CliArgs = {
   startUrl?: string;
+  concurrency?: number;
   delayMs?: number;
 };
 
@@ -45,6 +49,9 @@ export function readCliArgs(args: string[]): CliArgs {
       "delay-ms": {
         type: "string",
       },
+      concurrency: {
+        type: "string",
+      },
     },
   });
 
@@ -54,11 +61,25 @@ export function readCliArgs(args: string[]): CliArgs {
 
   return {
     startUrl: parsed.positionals[0],
+    concurrency:
+      parsed.values.concurrency === undefined
+        ? undefined
+        : parseConcurrency(parsed.values.concurrency),
     delayMs:
       parsed.values["delay-ms"] === undefined
         ? undefined
         : parseDelayMs(parsed.values["delay-ms"]),
   };
+}
+
+function parseConcurrency(value: string): number {
+  const concurrency = Number(value);
+
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error("--concurrency must be a positive integer");
+  }
+
+  return concurrency;
 }
 
 function parseDelayMs(value: string): number {

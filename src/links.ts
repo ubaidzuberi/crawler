@@ -9,7 +9,7 @@ export type ExtractedLinks = {
 export function extractLinks(
   html: string,
   currentPageUrl: string,
-  startUrl: string,
+  startUrl: URL,
 ): ExtractedLinks {
   const root = parse(html);
   const links = new Set<string>();
